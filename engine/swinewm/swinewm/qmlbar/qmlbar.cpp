@@ -26,6 +26,7 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <functional>
