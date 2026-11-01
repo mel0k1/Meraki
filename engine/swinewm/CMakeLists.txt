@@ -118,6 +118,12 @@ if(NOT MSVC)
 endif()
 
 if(WIN32)
+  option(MERAKI_QML "Build the Meraki QML shell layer" ON)
+  if(MERAKI_QML)
+    enable_language(CXX)
+    set(CMAKE_AUTOMOC ON)
+    find_package(Qt6 REQUIRED COMPONENTS Quick)
+  endif()
   enable_language(RC)
   set(SWINEWM_ICON ${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/swinewm.ico)
   configure_file(swinewm/win32/swinewm.rc.in
@@ -161,6 +167,20 @@ if(WIN32)
     WINVER=0x0A00 _WIN32_WINNT=0x0A00)
   target_link_libraries(swinewm PRIVATE swinewm_core user32 gdi32 dwmapi shell32
     shcore advapi32 ole32 windowscodecs msimg32 uuid iphlpapi wlanapi pdh ws2_32 powrprof)
+
+  if(MERAKI_QML)
+    target_sources(swinewm PRIVATE
+      swinewm/qmlbar/bridge.c
+      swinewm/qmlbar/qmlbar.cpp)
+    qt_add_resources(swinewm "meraki_qml" PREFIX "/qml" FILES
+      swinewm/qml/Meraki/Main.qml
+      swinewm/qml/Meraki/Bar.qml
+      swinewm/qml/Meraki/Workspaces.qml
+      swinewm/qml/Meraki/Clock.qml)
+    target_compile_definitions(swinewm PRIVATE MERAKI_QML)
+    set_property(TARGET swinewm PROPERTY CXX_STANDARD 17)
+    target_link_libraries(swinewm PRIVATE Qt6::Quick)
+  endif()
 
   # The bar's CSS engine and per-pixel alpha drawing, for wofi's style.css.
   add_executable(swinemenu WIN32 swinemenu/main.c swinemenu/apps.c

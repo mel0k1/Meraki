@@ -235,6 +235,4 @@ explorer_taskbar autohide
 # Waybar's own formats; without them a built-in default is used. In an
 # existing sway config, "exec waybar" or "bar { swaybar_command waybar }"
 # work as well.
-bar {
-    position top
-}
+bar mode invisible

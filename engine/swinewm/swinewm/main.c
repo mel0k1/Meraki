@@ -11,6 +11,10 @@
 #include "swinewm/platform.h"
 #include "swinewm/server.h"
 
+#ifdef MERAKI_QML
+#include "qmlbar/qmlbar.h"
+#endif
+
 static const char usage[] =
 	"Usage: swinewm [options] [command]\n"
 	"\n"
@@ -164,8 +168,14 @@ int main(int argc, char **argv) {
 	swaynag_show_config_errors();
 	transaction_commit_dirty();
 
+	#ifdef MERAKI_QML
+	meraki_qml_start();
+#endif
 	swine_log(SWINE_INFO, "Running swinewm " SWINEWM_VERSION);
 	int status = platform_run();
+#ifdef MERAKI_QML
+	meraki_qml_stop();
+#endif
 
 	swine_log(SWINE_INFO, "Shutting down swinewm");
 	platform_finish();
