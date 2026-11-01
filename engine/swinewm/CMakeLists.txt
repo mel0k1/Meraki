@@ -172,11 +172,21 @@ if(WIN32)
     target_sources(swinewm PRIVATE
       swinewm/qmlbar/bridge.c
       swinewm/qmlbar/qmlbar.cpp)
+    set(MERAKI_QML_ROOT swinewm/qml)
+    foreach(f Meraki/Main.qml Meraki/Bar.qml Meraki/Workspaces.qml Meraki/Clock.qml
+        Meraki/glass/LiquidGlass.qml Meraki/dock/Dock.qml Meraki/dock/DockIcon.qml
+        Meraki/dock/DockTip.qml)
+      set_source_files_properties(${MERAKI_QML_ROOT}/${f} PROPERTIES QT_RESOURCE_ALIAS ${f})
+    endforeach()
     qt_add_resources(swinewm "meraki_qml" PREFIX "/qml" FILES
-      swinewm/qml/Meraki/Main.qml
-      swinewm/qml/Meraki/Bar.qml
-      swinewm/qml/Meraki/Workspaces.qml
-      swinewm/qml/Meraki/Clock.qml)
+      ${MERAKI_QML_ROOT}/Meraki/Main.qml
+      ${MERAKI_QML_ROOT}/Meraki/Bar.qml
+      ${MERAKI_QML_ROOT}/Meraki/Workspaces.qml
+      ${MERAKI_QML_ROOT}/Meraki/Clock.qml
+      ${MERAKI_QML_ROOT}/Meraki/glass/LiquidGlass.qml
+      ${MERAKI_QML_ROOT}/Meraki/dock/Dock.qml
+      ${MERAKI_QML_ROOT}/Meraki/dock/DockIcon.qml
+      ${MERAKI_QML_ROOT}/Meraki/dock/DockTip.qml)
     qt_add_shaders(swinewm "meraki_shaders" PREFIX "/shaders" FILES
       swinewm/qml/Meraki/shaders/liquidglass.frag
       swinewm/qml/Meraki/shaders/dockglass.frag)
