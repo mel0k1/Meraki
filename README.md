@@ -38,7 +38,7 @@ Linux:
 сбоя оболочки: `swinewm.exe --recover` вернёт спрятанные окна.
 
 Конфиг: `%USERPROFILE%\.swinewm\config` — синтаксис sway. Нативный бар
-движка скрыт (`bar mode invisible`): верхнюю панель рисует QML-слой
+движка скрыт (`bar mode invisible`): верхнюю панель и док рисует QML-слой
 Meraki; вернуть движковый бар можно, заменив строку на `bar { position top }`.
 
 ## Лицензии
