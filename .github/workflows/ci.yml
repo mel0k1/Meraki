@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: markdownlint
+        run: npx --yes markdownlint-cli README.md docs/*.md
+      - name: configure
+        run: cmake -S engine/swinewm -B build
+      - name: build
+        run: cmake --build build -j
+      - name: test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.3"
+          arch: win64_msvc2019_64
+          cache: true
+      - name: configure
+        run: cmake -S engine/swinewm -B build -A x64 -DCMAKE_PREFIX_PATH="$env:Qt6_DIR"
+      - name: build
+        run: cmake --build build --config Release -j
+      - name: qmllint
+        continue-on-error: true
+        run: |
+          Get-ChildItem engine/swinewm/swinewm/qml/Meraki/*.qml | ForEach-Object {
+            qmllint $_.FullName
+          }
