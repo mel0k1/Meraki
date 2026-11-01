@@ -1,0 +1,9 @@
+[submodule "sway"]
+	path = sway
+	url = https://github.com/swaywm/sway
+[submodule "mako"]
+	path = mako
+	url = https://github.com/emersion/mako
+[submodule "waybar"]
+	path = waybar
+	url = https://github.com/alexays/waybar

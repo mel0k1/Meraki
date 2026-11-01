@@ -1,0 +1,74 @@
+# SwineWM
+## "Putting lipstick on a pig"
+SwineWM is an [alternative shell](https://en.wikipedia.org/wiki/List_of_alternative_shells_for_Windows) 
+for Microsoft Windows that works like a [Sway](https://swaywm.org/) desktop:
+a keyboard-driven tiling window manager with workspaces, a [Waybar](https://github.com/Alexays/Waybar)
+-style bar and [Mako](https://github.com/emersion/mako)-style notifications. The aim is that
+Sway users can bring their config and habits to Windows.
+
+## Approach
+
+SwineWM is a **from-scratch, Windows-native clone**, not a port. It manages
+ordinary Windows application windows through Win32 APIs and leaves
+compositing to Windows (DWM). Sway, Waybar and Mako are the specification:
+their sources are included as submodules and used as reference for
+behaviour, config syntax, IPC protocol and defaults, which SwineWM
+reproduces as faithfully as Windows allows. The earlier plan of porting
+Wayland, wlroots and Sway to Windows is archived in
+[`doc/archive/`](doc/archive/).
+
+Unlike on Linux, the window manager, bar and notifications are one
+program, `swinewm.exe`; each part still reads the config files of the
+program it replaces.
+
+| Linux | SwineWM | Status |
+| --- | --- | --- |
+| sway | `swinewm.exe` — tiling window manager (sway config) | Early draft, runs |
+| waybar | built into `swinewm.exe` (Waybar config + style.css) | Early draft, runs |
+| mako | built into `swinewm.exe` (mako config) | Early draft, runs |
+| notify-send, makoctl | `notify-send.exe`, `makoctl.exe` — same options as on Linux | Early draft, runs |
+| swaymsg | `swinemsg.exe` — IPC client | Early draft, runs |
+| grim | built into `swinewm.exe` (Print key) | Early draft, runs |
+
+## Repository layout
+
+| Path | What |
+| --- | --- |
+| [`swinewm/`](swinewm/) | `swinewm` (window manager, bar, notifications), `swinemsg`, `swinemenu`, `notify-send` and `makoctl`, in C11 ([README](swinewm/README.md)) |
+| [`doc/`](doc/) | [Windows for Linux users](doc/linux-users.md), [project summary and roadmap](doc/project_summary.md), [design strategy](doc/design_strategy.md), [architecture](doc/architecture.md), [Sway compatibility](doc/compatibility.md), [packaging](doc/packaging.md) |
+| `sway/`, `waybar/`, `mako/` | Upstream sources (submodules), used as reference |
+
+Clone with `git clone --recurse-submodules` to get the reference sources.
+
+## Status
+
+`swinewm` implements Sway's layout tree, focus model and many everyday
+commands, loads Sway config files and answers i3/Sway IPC requests over a
+named pipe. It draws a Waybar-style bar from a Waybar config and style sheet,
+and Mako-style notifications from a mako config, hosts the Windows tray,
+takes screenshots like grim, and can replace Explorer as the Windows shell.
+It is a work in progress and is used as a shell on Windows 11. Current
+support and known gaps are listed in [`doc/compatibility.md`](doc/compatibility.md);
+the roadmap and design priorities are in
+[`doc/project_summary.md`](doc/project_summary.md) and
+[`doc/design_strategy.md`](doc/design_strategy.md).
+
+To try it, install the MSI from
+[Releases](https://github.com/staalmannen/SwineWM/releases) and see
+[`swinewm/README.md`](swinewm/README.md). It runs as an ordinary program
+next to Explorer and shows all windows again when it exits. New to Windows?
+Start with [`doc/linux-users.md`](doc/linux-users.md).
+
+## Default config
+
+`swinewm` uses [Alacritty](https://alacritty.org/) as default terminal ($mod+Enter) and
+its own `swinemenu` as application launcher ($mod+d): a small wofi-like menu
+that follows the bar's theme. Other launchers, such as
+[Flow Launcher](https://www.flowlauncher.com/), can be set as `$menu`.
+Config files are compatible with upstream Sway, Waybar and Mako. Your Waybar, mako and sway config files go in `%USERPROFILE%\.swinewm\` under the same names as on Linux (`waybar\config.jsonc`, `waybar\style.css`, `mako\config`, `config`). 
+
+
+## License
+
+MIT; see [LICENSE](LICENSE). Code ported from Sway, Waybar or Mako (also MIT)
+keeps the original copyright notice.

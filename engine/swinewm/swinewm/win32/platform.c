@@ -1,0 +1,411 @@
+// Win32 platform entry points: the shell's hidden window, the message loop,
+// and start-up/shut-down ordering.
+#include <stdlib.h>
+#include <wchar.h>
+#include "ipc.h"
+#include "log.h"
+#include "stringop.h"
+#include "swinewm/bar/custom.h"
+#include "swinewm/commands.h"
+#include "swinewm/config.h"
+#include "swinewm/desktop/transaction.h"
+#include "swinewm/input/keyboard.h"
+#include "swinewm/ipc-json.h"
+#include "swinewm/notify.h"
+#include "swinewm/platform.h"
+#include "swinewm/server.h"
+#include "swinewm/sysinfo.h"
+#include "win32.h"
+#include <objbase.h>
+
+HWND win32_shell_hwnd = NULL;
+static bool keyboard_ok = false;
+static bool mouse_ok = false;
+static UINT shell_hook_message = 0;
+
+// Timers on the shell window: a 1 s tick for the bar (clock, cpu, ...) and
+// a one-shot timer for the next notification expiry.
+#define TIMER_TICK 1
+#define TIMER_NOTIFY 2
+#define TIMER_DISPLAY 3
+#define TIMER_SCRIPTS 5   // the next bar script that is due (4: layout.c)
+
+// Display settings can produce a burst of notifications while Windows and
+// the display driver settle on the final monitor geometry and DPI.
+#define DISPLAY_REFRESH_DELAY 150
+
+static void refresh_display_state(void) {
+	win32_shell_resize_desktop();
+	win32_outputs_update();
+	transaction_commit_dirty();
+	char *event = ipc_json_event_output("unspecified");
+	platform_ipc_event((uint32_t)IPC_EVENT_OUTPUT, event);
+	free(event);
+}
+
+static void schedule_display_refresh(void) {
+	if (!SetTimer(win32_shell_hwnd, TIMER_DISPLAY, DISPLAY_REFRESH_DELAY, NULL)) {
+		swine_log(SWINE_ERROR, "Unable to schedule display refresh (error %lu)",
+			GetLastError());
+		refresh_display_state();
+	}
+}
+
+void win32_run_command(const char *command) {
+	win32_busy++;
+	char *copy = swine_strdup(command);
+	list_t *res_list = execute_command(copy, NULL);
+	free(copy);
+	for (int i = 0; i < res_list->length; ++i) {
+		struct cmd_results *res = res_list->items[i];
+		if (res->status != CMD_SUCCESS) {
+			swine_log(SWINE_ERROR, "Command '%s' failed: %s", command,
+				res->error ? res->error : "");
+		}
+	}
+	free_cmd_results_list(res_list);
+	transaction_commit_dirty();
+	win32_busy--;
+}
+
+static LRESULT handle_shell_message(HWND hwnd, UINT msg, WPARAM wparam,
+		LPARAM lparam) {
+	switch (msg) {
+	case WM_SWINE_BINDING: {
+		char *command = (char *)lparam;
+		win32_run_command(command);
+		free(command);
+		return 0;
+	}
+	case WM_SWINE_IPC:
+		win32_ipc_handle((struct win32_ipc_request *)lparam);
+		return 0;
+	case WM_SWINE_EVENTS:
+		win32_windows_drain_events();
+		return 0;
+	case WM_SWINE_SAVE_HIDDEN:
+		win32_recover_save();
+		return 0;
+	case WM_SWINE_TRAY:
+		win32_tray_handle_message(wparam, lparam);
+		return 0;
+	case WM_SWINE_DISPLAY_REFRESH:
+		schedule_display_refresh();
+		return 0;
+	case WM_SWINE_MOTION:
+		win32_mouse_handle_motion();
+		return 0;
+	case WM_SWINE_SCRIPT:
+		win32_script_message(lparam);
+		return 0;
+	case WM_SWINE_TOAST:
+		win32_toast_message(lparam);
+		return 0;
+	case WM_SWINE_SLURP:
+		win32_slurp_key(wparam, lparam);
+		return 0;
+	case WM_DISPLAYCHANGE:
+	case WM_DPICHANGED:
+		schedule_display_refresh();
+		return 0;
+	case WM_SETTINGCHANGE:
+		if (wparam == SPI_SETWORKAREA && !win32_shell_mode) {
+			// The taskbar or an app bar changed size. As the shell we set
+			// the work area ourselves and do not follow it.
+			schedule_display_refresh();
+		}
+		return 0;
+	case WM_TIMER:
+		if (wparam == TIMER_DISPLAY) {
+			KillTimer(hwnd, TIMER_DISPLAY);
+			refresh_display_state();
+		} else if (wparam == TIMER_SCRIPTS) {
+			KillTimer(hwnd, TIMER_SCRIPTS);
+			bar_scripts_tick(platform_now_ms());
+			platform_ui_refresh();
+		} else if (wparam == WIN32_TIMER_LAYOUT) {
+			KillTimer(hwnd, WIN32_TIMER_LAYOUT);
+			keyboard_layouts_refresh();
+		} else if (wparam == TIMER_TICK || wparam == TIMER_NOTIFY) {
+			if (wparam == TIMER_TICK) {
+				// Windows has no event for a layout switched with its own
+				// hotkey (Alt+Shift, Win+Space): look once a second.
+				keyboard_layouts_refresh();
+			}
+			notify_tick(platform_now_ms());
+			platform_ui_refresh();
+		}
+		return 0;
+	case WM_CLOSE:
+		win32_watch_signal_exit();
+		PostQuitMessage(0);
+		return 0;
+	default:
+		if (shell_hook_message && msg == shell_hook_message) {
+			win32_windows_shell_hook(wparam, lparam);
+			return 0;
+		}
+		return DefWindowProcW(hwnd, msg, wparam, lparam);
+	}
+}
+
+static LRESULT CALLBACK shell_wndproc(HWND hwnd, UINT msg, WPARAM wparam,
+		LPARAM lparam) {
+	win32_busy++;
+	LRESULT result = handle_shell_message(hwnd, msg, wparam, lparam);
+	win32_busy--;
+	return result;
+}
+
+static BOOL WINAPI console_handler(DWORD type) {
+	(void)type;
+	// Runs on a separate thread: only post, and let the main loop clean up.
+	if (win32_shell_hwnd) {
+		PostMessageW(win32_shell_hwnd, WM_CLOSE, 0, 0);
+		return TRUE;
+	}
+	return FALSE;
+}
+
+static LONG WINAPI crash_handler(EXCEPTION_POINTERS *info) {
+	(void)info;
+	// Best effort: never leave the user with invisible applications, a
+	// hidden taskbar, or (as the shell) no shell at all.
+	win32_windows_show_all();
+	win32_decor_restore_all(1000);
+	win32_theme_restore();
+	win32_shell_restore_taskbar();
+	win32_outputs_restore_settings();
+	win32_tray_crash();
+	if (!win32_watch_responsible()) {
+		win32_shell_rescue();
+	}
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+bool platform_init(void) {
+	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+	// COM is needed by the Windows Imaging Component (wallpapers).
+	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+	int restored = platform_recover_windows();
+	if (restored) {
+		swine_log(SWINE_INFO, "Restored %d window(s) hidden by a previous run",
+			restored);
+	}
+
+	HINSTANCE instance = GetModuleHandleW(NULL);
+	WNDCLASSEXW wc = { .cbSize = sizeof(wc) };
+	wc.lpfnWndProc = shell_wndproc;
+	wc.hInstance = instance;
+	wc.lpszClassName = L"swinewm";
+	if (!RegisterClassExW(&wc)) {
+		swine_log(SWINE_ERROR, "RegisterClassEx failed");
+		return false;
+	}
+	// A hidden top-level window rather than a message-only window, because
+	// only top-level windows receive WM_DISPLAYCHANGE / WM_SETTINGCHANGE.
+	win32_shell_hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, L"swinewm", L"swinewm",
+		WS_POPUP, 0, 0, 0, 0, NULL, NULL, instance, NULL);
+	if (!win32_shell_hwnd) {
+		swine_log(SWINE_ERROR, "CreateWindowEx failed");
+		return false;
+	}
+
+	SetConsoleCtrlHandler(console_handler, TRUE);
+	SetUnhandledExceptionFilter(crash_handler);
+
+	if (!win32_ipc_init()) {
+		return false;
+	}
+	win32_outputs_update();
+	if (!win32_windows_init()) {
+		swine_log(SWINE_ERROR, "Unable to install window event hooks");
+		return false;
+	}
+	keyboard_ok = win32_keyboard_init();
+	mouse_ok = win32_mouse_init();
+	// Shell hook messages: urgency (HSHELL_FLASH) and fullscreen changes.
+	shell_hook_message = RegisterWindowMessageW(L"SHELLHOOK");
+	if (!RegisterShellHookWindow(win32_shell_hwnd)) {
+		shell_hook_message = 0;
+	}
+	win32_windows_manage_existing();
+	SetTimer(win32_shell_hwnd, TIMER_TICK, 1000, NULL);
+	win32_shell_start();
+	win32_theme_init();   // after the crash recovery above
+	win32_watch_start();
+	return true;
+}
+
+void platform_ui_refresh(void) {
+	if (!win32_shell_hwnd) {
+		return;
+	}
+	win32_shell_update_work_area(false);
+	win32_shell_apply_taskbar();
+	win32_tray_update();
+	win32_wallpaper_refresh();
+	win32_bar_refresh();
+	win32_toasts_update();
+	win32_notify_refresh();
+	long long next = notify_next_expiry();
+	if (next) {
+		long long delay = next - platform_now_ms();
+		SetTimer(win32_shell_hwnd, TIMER_NOTIFY,
+			(UINT)(delay < 10 ? 10 : delay), NULL);
+	} else {
+		KillTimer(win32_shell_hwnd, TIMER_NOTIFY);
+	}
+	// Bar scripts (the bar above may just have loaded them).
+	long long due = bar_scripts_next_due();
+	if (due) {
+		long long delay = due - platform_now_ms();
+		SetTimer(win32_shell_hwnd, TIMER_SCRIPTS,
+			(UINT)(delay < 1 ? 1 : delay > 0x7FFFFFFF ? 0x7FFFFFFF : delay), NULL);
+	} else {
+		KillTimer(win32_shell_hwnd, TIMER_SCRIPTS);
+	}
+}
+
+void platform_swaynag_show(const char *details) {
+	win32_swaynag_show(details);
+}
+
+long long platform_now_ms(void) {
+	return (long long)GetTickCount64();
+}
+
+int platform_run(void) {
+	MSG msg;
+	BOOL result;
+	while ((result = GetMessageW(&msg, NULL, 0, 0)) > 0) {
+		TranslateMessage(&msg);
+		DispatchMessageW(&msg);
+	}
+	return result == -1 ? EXIT_FAILURE : (int)msg.wParam;
+}
+
+void platform_quit(void) {
+	platform_ipc_event((uint32_t)IPC_EVENT_SHUTDOWN, "{\"change\":\"exit\"}");
+	win32_watch_signal_exit();
+	win32_shell_exit();
+	PostQuitMessage(0);
+}
+
+static bool restart_requested = false;
+
+void platform_restart(void) {
+	swine_log(SWINE_INFO, "Restarting");
+	platform_ipc_event((uint32_t)IPC_EVENT_SHUTDOWN,
+		"{\"change\":\"restart\"}");
+	win32_watch_signal_exit();
+	restart_requested = true;
+	PostQuitMessage(0);
+}
+
+// Starts this executable again, by its original path: after the running
+// swinewm.exe was renamed and a new one copied in, that is the new one.
+// Runs last in platform_finish, when our shell window, desktop and tray are
+// gone, so the new instance finds things as at logon.
+static void respawn(void) {
+	wchar_t *cmdline = _wcsdup(GetCommandLineW());
+	// The new instance waits for this one to be gone (IPC pipe, hooks).
+	wchar_t pid[16];
+	swprintf(pid, 16, L"%lu", GetCurrentProcessId());
+	SetEnvironmentVariableW(L"SWINEWM_RESTART_PID", pid);
+	STARTUPINFOW si = { .cb = sizeof(si) };
+	PROCESS_INFORMATION pi = {0};
+	// As the shell there is no terminal to share: no console window.
+	DWORD flags = win32_shell_mode ? DETACHED_PROCESS : 0;
+	if (cmdline && CreateProcessW(NULL, cmdline, NULL, NULL, FALSE, flags,
+			NULL, NULL, &si, &pi)) {
+		CloseHandle(pi.hThread);
+		CloseHandle(pi.hProcess);
+	} else {
+		char *msg = win32_error_string(GetLastError());
+		swine_log(SWINE_ERROR, "Unable to restart: %s", msg);
+		free(msg);
+		if (win32_shell_mode) {
+			win32_shell_rescue();   // never leave the user without a shell
+		}
+	}
+	free(cmdline);
+}
+
+void platform_finish(void) {
+	win32_ipc_flush(500);
+	if (keyboard_ok) {
+		win32_keyboard_finish();
+	}
+	if (mouse_ok) {
+		win32_mouse_finish();
+	}
+	if (shell_hook_message) {
+		DeregisterShellHookWindow(win32_shell_hwnd);
+	}
+	win32_shell_finish();
+	win32_windows_finish();
+	win32_windows_show_all();
+	win32_decor_restore_all(2000);
+	win32_theme_restore();
+	win32_tray_finish();
+	win32_titlebars_finish();
+	win32_appbar_finish();   // before the bar windows go
+	win32_bar_finish();
+	win32_scripts_finish();
+	win32_slurp_finish();
+	win32_toasts_finish();
+	win32_notify_finish();
+	win32_swaynag_finish();
+	win32_wallpaper_finish();
+	win32_outputs_finish();
+	win32_recover_display_done();
+	win32_network_finish();
+	win32_audio_finish();   // COM objects: before CoUninitialize
+	sysinfo_inhibit_idle(false);
+	CoUninitialize();
+	win32_fonts_clear();
+	win32_layouts_finish();
+	win32_recover_clear();
+	if (win32_shell_hwnd) {
+		DestroyWindow(win32_shell_hwnd);
+		win32_shell_hwnd = NULL;
+	}
+	win32_watch_finish();
+	if (restart_requested) {
+		respawn();
+	}
+}
+
+// After the shutdown event nothing more is sent, as in sway: letting go of
+// the windows on the way out is not "close".
+static bool ipc_shut_down = false;
+
+void platform_ipc_event(uint32_t type, const char *payload) {
+	if (ipc_shut_down) {
+		return;
+	}
+	win32_ipc_publish(type, payload);
+	if (type == (uint32_t)IPC_EVENT_SHUTDOWN) {
+		ipc_shut_down = true;
+	}
+}
+
+uint32_t platform_ipc_input_capabilities(void) {
+	uint32_t capabilities = 0;
+	if (keyboard_ok) {
+		capabilities |= PLATFORM_IPC_INPUT_KEYBOARD;
+	}
+	if (mouse_ok) {
+		capabilities |= PLATFORM_IPC_INPUT_POINTER;
+	}
+	return capabilities;
+}
+
+void platform_config_changed(void) {
+	// Bindings are looked up live from the config, so nothing to re-register.
+	win32_toasts_config_changed();
+	platform_ipc_event((uint32_t)IPC_EVENT_BARCONFIG_UPDATE,
+		"{\"id\":\"bar-0\"}");
+}
