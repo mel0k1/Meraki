@@ -27,6 +27,7 @@ jobs:
         with:
           version: "6.7.3"
           arch: win64_msvc2019_64
+          modules: qtshadertools
           cache: true
       - name: configure
         run: cmake -S engine/swinewm -B build -A x64 -DCMAKE_PREFIX_PATH="$env:Qt6_DIR"
