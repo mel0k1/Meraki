@@ -122,7 +122,7 @@ if(WIN32)
   if(MERAKI_QML)
     enable_language(CXX)
     set(CMAKE_AUTOMOC ON)
-    find_package(Qt6 REQUIRED COMPONENTS Quick)
+    find_package(Qt6 REQUIRED COMPONENTS Quick Shadertools)
   endif()
   enable_language(RC)
   set(SWINEWM_ICON ${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/swinewm.ico)
@@ -177,6 +177,9 @@ if(WIN32)
       swinewm/qml/Meraki/Bar.qml
       swinewm/qml/Meraki/Workspaces.qml
       swinewm/qml/Meraki/Clock.qml)
+    qt_add_shaders(swinewm "meraki_shaders" PREFIX "/shaders" FILES
+      swinewm/qml/Meraki/shaders/liquidglass.frag
+      swinewm/qml/Meraki/shaders/dockglass.frag)
     target_compile_definitions(swinewm PRIVATE MERAKI_QML)
     set_property(TARGET swinewm PROPERTY CXX_STANDARD 17)
     target_link_libraries(swinewm PRIVATE Qt6::Quick)
