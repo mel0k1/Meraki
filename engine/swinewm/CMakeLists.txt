@@ -175,9 +175,10 @@ if(WIN32)
       swinewm/qmlbar/capture.cpp)
     set(MERAKI_QML_ROOT swinewm/qml)
     foreach(f Meraki/Main.qml Meraki/Bar.qml Meraki/Workspaces.qml Meraki/Clock.qml
-        Meraki/MinimizeFx.qml Meraki/glass/LiquidGlass.qml Meraki/dock/Dock.qml
+        Meraki/MinimizeFx.qml Meraki/glass/LiquidGlass.qml
+        Meraki/glass/DockGlassPanel.qml Meraki/dock/Dock.qml
         Meraki/dock/DockIcon.qml Meraki/dock/DockTip.qml Meraki/dock/Preview.qml
-        Meraki/dock/DockMenu.qml)
+        Meraki/dock/DockMenu.qml Meraki/center/Center.qml)
       set_source_files_properties(${MERAKI_QML_ROOT}/${f} PROPERTIES QT_RESOURCE_ALIAS ${f})
     endforeach()
     qt_add_resources(swinewm "meraki_qml" PREFIX "/qml" FILES
@@ -187,11 +188,13 @@ if(WIN32)
       ${MERAKI_QML_ROOT}/Meraki/Clock.qml
       ${MERAKI_QML_ROOT}/Meraki/MinimizeFx.qml
       ${MERAKI_QML_ROOT}/Meraki/glass/LiquidGlass.qml
+      ${MERAKI_QML_ROOT}/Meraki/glass/DockGlassPanel.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/Dock.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/DockIcon.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/DockTip.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/Preview.qml
-      ${MERAKI_QML_ROOT}/Meraki/dock/DockMenu.qml)
+      ${MERAKI_QML_ROOT}/Meraki/dock/DockMenu.qml
+      ${MERAKI_QML_ROOT}/Meraki/center/Center.qml)
     qt_add_shaders(swinewm "meraki_shaders" PREFIX "/shaders" FILES
       swinewm/qml/Meraki/shaders/liquidglass.frag
       swinewm/qml/Meraki/shaders/dockglass.frag)

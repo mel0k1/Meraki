@@ -627,10 +627,294 @@ private:
 
 static MerakiDock *g_dock = nullptr;
 
+class MerakiCenter : public QObject {
+        Q_OBJECT
+        Q_PROPERTY(QVariantList notes READ notes NOTIFY notesChanged)
+        Q_PROPERTY(int count READ count NOTIFY notesChanged)
+        Q_PROPERTY(bool open READ isOpen NOTIFY openChanged)
+        Q_PROPERTY(int screenWidth READ screenWidth CONSTANT)
+        Q_PROPERTY(int screenHeight READ screenHeight CONSTANT)
+        Q_PROPERTY(QUrl wallpaper READ wallpaper CONSTANT)
+        Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
+        Q_PROPERTY(qreal panelY MEMBER m_panelY)
+        Q_PROPERTY(qreal panelH MEMBER m_panelH)
+
+public:
+        explicit MerakiCenter(QObject *parent = nullptr) : QObject(parent) {
+                m_regionTimer = new QTimer(this);
+                m_regionTimer->setInterval(90);
+                connect(m_regionTimer, &QTimer::timeout, this,
+                        &MerakiCenter::applyRegion);
+                m_regionTimer->start();
+        }
+
+        void init() {
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        const QRect g = screen->geometry();
+                        m_screenWidth = g.width();
+                        m_screenHeight = g.height();
+                }
+                wchar_t wp[MAX_PATH] = {};
+                SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wp, 0);
+                QString wall = QString::fromWCharArray(wp);
+                if (!wall.isEmpty()) {
+                        m_wallpaper = QUrl::fromLocalFile(wall);
+                }
+                m_view = new QQuickView();
+                m_view->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
+                        Qt::Tool | Qt::NoDropShadowWindowHint);
+                m_view->setColor(Qt::transparent);
+                m_view->setResizeMode(QQuickView::SizeRootObjectToView);
+                m_view->rootContext()->setContextProperty("bridge", this);
+                m_view->engine()->addImageProvider("dockicon",
+                        new DockIconProvider());
+                m_view->setSource(QUrl(QStringLiteral(
+                        "qrc:/qml/Meraki/center/Center.qml")));
+                const int w = 384;
+                const int h = std::min(620, std::max(320, m_screenHeight - 60));
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        const QRect g = screen->geometry();
+                        m_view->setGeometry(g.x() + g.width() - w - 12, g.y(), w, h);
+                }
+                syncWindows();
+                refreshNotes();
+        }
+
+        QVariantList notes() const {
+                return m_notes;
+        }
+
+        int count() const {
+                return m_notes.size();
+        }
+
+        bool isOpen() const {
+                return m_open;
+        }
+
+        int screenWidth() const {
+                return m_screenWidth;
+        }
+
+        int screenHeight() const {
+                return m_screenHeight;
+        }
+
+        QUrl wallpaper() const {
+                return m_wallpaper;
+        }
+
+        QVariantList windows() const {
+                return m_windows;
+        }
+
+        Q_INVOKABLE void toggle() {
+                if (!m_view) {
+                        init();
+                }
+                if (m_open) {
+                        setOpen(false);
+                } else {
+                        syncWindows();
+                        refreshNotes();
+                        m_view->show();
+                        m_view->raise();
+                        setOpen(true);
+                }
+        }
+
+        Q_INVOKABLE void close() {
+                setOpen(false);
+        }
+
+        Q_INVOKABLE void dismiss(qint64 id) {
+                const std::string text = std::to_string(id);
+                char *error = nullptr;
+                char *reply = ipc_request(nullptr, SWINE_IPC_CLOSE_NOTIFICATION,
+                        text.c_str(), &error);
+                if (reply) {
+                        free(reply);
+                }
+                if (error) {
+                        free(error);
+                }
+                refreshNotes();
+        }
+
+        Q_INVOKABLE void clearAll() {
+                for (const qlonglong id : m_activeIds) {
+                        char *error = nullptr;
+                        char *reply = ipc_request(nullptr,
+                                SWINE_IPC_CLOSE_NOTIFICATION,
+                                std::to_string(id).c_str(), &error);
+                        if (reply) {
+                                free(reply);
+                        }
+                        if (error) {
+                                free(error);
+                        }
+                }
+                refreshNotes();
+        }
+
+        Q_INVOKABLE void focusApp(const QString &app) {
+                if (!g_dock) {
+                        return;
+                }
+                const QString lower = app.toLower();
+                for (const QVariant &v : g_dock->windows()) {
+                        const QVariantMap w = v.toMap();
+                        if (w.value("appId").toString().toLower() == lower) {
+                                runCommand("[con_id=" + std::to_string(
+                                        (long long)w.value("id").toLongLong())
+                                        + "] focus");
+                                return;
+                        }
+                }
+        }
+
+public slots:
+        void refreshNotes() {
+                QVariantList list;
+                std::map<qlonglong, bool> index;
+                m_activeIds.clear();
+                appendNotify(SWINE_IPC_GET_NOTIFICATIONS, list, index, true);
+                appendNotify(SWINE_IPC_GET_NOTIFICATION_HISTORY, list, index,
+                        false);
+                if (list != m_notes) {
+                        m_notes = list;
+                        emit notesChanged();
+                }
+        }
+
+signals:
+        void notesChanged();
+        void openChanged();
+        void windowsChanged();
+
+private:
+        static void runCommand(const std::string &cmd) {
+                meraki_ipc_command(cmd.c_str());
+        }
+
+        void appendNotify(uint32_t type, QVariantList &out,
+                std::map<qlonglong, bool> &index, bool active) {
+                char *error = nullptr;
+                char *payload = ipc_request(nullptr, type, "", &error);
+                if (!payload) {
+                        if (error) {
+                                free(error);
+                        }
+                        return;
+                }
+                const QJsonDocument document =
+                        QJsonDocument::fromJson(QByteArray(payload));
+                free(payload);
+                QVariantList items;
+                const QJsonArray array = document.array();
+                for (const QJsonValue &v : array) {
+                        const QJsonObject o = v.toObject();
+                        const qlonglong id = (qlonglong)o.value("id").toDouble();
+                        const QString app = o.value("app_name").toString();
+                        const QString summary = o.value("summary").toString();
+                        const QString body = o.value("body").toString();
+                        if (app.isEmpty() && summary.isEmpty() && body.isEmpty()) {
+                                continue;
+                        }
+                        if (index.count(id)) {
+                                continue;
+                        }
+                        if (active) {
+                                m_activeIds.append(id);
+                        }
+                        if (!m_seen.count(id)) {
+                                if (m_seen.size() > 512) {
+                                        m_seen.erase(m_seen.begin());
+                                }
+                                m_seen[id] = QDateTime::currentMSecsSinceEpoch();
+                        }
+                        QVariantMap n;
+                        n.insert("id", id);
+                        n.insert("app", app);
+                        n.insert("summary", summary);
+                        n.insert("body", body);
+                        n.insert("urgency", o.value("urgency").toString());
+                        n.insert("when", m_seen[id]);
+                        index[id] = true;
+                        items.append(n);
+                }
+                if (active) {
+                        for (int i = items.size() - 1; i >= 0; --i) {
+                                out.prepend(items.at(i));
+                        }
+                } else {
+                        for (const QVariant &n : items) {
+                                out.append(n);
+                        }
+                }
+        }
+
+        void setOpen(bool open) {
+                if (m_open == open) {
+                        return;
+                }
+                m_open = open;
+                emit openChanged();
+                if (!open) {
+                        QTimer::singleShot(300, this, [this]() {
+                                if (!m_open && m_view) {
+                                        m_view->hide();
+                                }
+                        });
+                }
+        }
+
+        void syncWindows() {
+                QVariantList list = g_dock ? g_dock->windows() : QVariantList();
+                if (list != m_windows) {
+                        m_windows = list;
+                        emit windowsChanged();
+                }
+        }
+
+        void applyRegion() {
+                if (!m_view || !m_view->isVisible()) {
+                        return;
+                }
+                const int y0 = std::max(0, (int)m_panelY);
+                const int y1 = std::min(m_view->height(),
+                        (int)(m_panelY + m_panelH));
+                if (y1 <= y0) {
+                        SetWindowRgn((HWND)m_view->winId(),
+                                CreateRectRgn(0, 0, 0, 0), FALSE);
+                        return;
+                }
+                SetWindowRgn((HWND)m_view->winId(), CreateRoundRectRgn(0, y0,
+                        m_view->width(), y1, 20, 20), FALSE);
+        }
+
+        QQuickView *m_view = nullptr;
+        QTimer *m_regionTimer = nullptr;
+        QVariantList m_notes;
+        QVariantList m_windows;
+        QVariantList m_activeIds;
+        std::map<uint32_t, qint64> m_seen;
+        QUrl m_wallpaper;
+        int m_screenWidth = 0;
+        int m_screenHeight = 0;
+        qreal m_panelY = 0;
+        qreal m_panelH = 0;
+        bool m_open = false;
+};
+
+static MerakiCenter *g_center = nullptr;
+
 class MerakiBar : public QObject {
         Q_OBJECT
         Q_PROPERTY(QVariantList workspaces READ workspaces NOTIFY workspacesChanged)
         Q_PROPERTY(QString activeName READ activeName NOTIFY workspacesChanged)
+        Q_PROPERTY(bool centerOpen READ centerOpen NOTIFY centerChanged)
+        Q_PROPERTY(int centerCount READ centerCount NOTIFY centerChanged)
 
 public:
         explicit MerakiBar(QObject *parent = nullptr) : QObject(parent) {
@@ -675,6 +959,20 @@ public:
                 refresh();
         }
 
+        bool centerOpen() const {
+                return g_center ? g_center->isOpen() : false;
+        }
+
+        int centerCount() const {
+                return g_center ? g_center->count() : 0;
+        }
+
+        Q_INVOKABLE void toggleCenter() {
+                if (g_center) {
+                        g_center->toggle();
+                }
+        }
+
 public slots:
         void poll() {
                 bool got = false;
@@ -685,10 +983,23 @@ public slots:
                                 break;
                         }
                         got = true;
+                        if (type == (uint32_t)SWINE_IPC_EVENT_NOTIFICATION
+                                && g_center) {
+                                g_center->refreshNotes();
+                        }
                         free(payload);
                 }
                 if (got) {
                         refresh();
+                }
+                if (g_center) {
+                        const int cc = g_center->count();
+                        const bool co = g_center->isOpen();
+                        if (cc != m_centerCount || co != m_centerOpen) {
+                                m_centerCount = cc;
+                                m_centerOpen = co;
+                                emit centerChanged();
+                        }
                 }
                 if (g_dock) {
                         g_dock->refresh();
@@ -729,6 +1040,7 @@ public slots:
 
 signals:
         void workspacesChanged();
+        void centerChanged();
 
 private:
         static void runCommand(const std::string &command) {
@@ -739,6 +1051,8 @@ private:
         QTimer *m_timer = nullptr;
         QVariantList m_workspaces;
         QString m_activeName;
+        int m_centerCount = 0;
+        bool m_centerOpen = false;
 };
 
 static HANDLE g_thread = nullptr;
@@ -759,7 +1073,11 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         MerakiDock dock;
         g_dock = &dock;
         dock.show();
+        MerakiCenter center;
+        g_center = &center;
+        center.init();
         app.exec();
+        g_center = nullptr;
         g_dock = nullptr;
         g_app = nullptr;
         g_fx = nullptr;

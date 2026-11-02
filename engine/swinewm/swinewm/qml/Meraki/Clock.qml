@@ -2,11 +2,13 @@ import QtQuick
 
 Item {
     id: clock
-    width: row.width
-    height: 22
+    width: row.width + 20
+    height: 24
 
     property string timeText: Qt.formatDateTime(new Date(), "HH:mm")
     property string dateText: Qt.formatDateTime(new Date(), "d MMM")
+    property bool open: bridge.centerOpen
+    property int unread: bridge.centerCount
 
     Timer {
         interval: 1000
@@ -19,9 +21,17 @@ Item {
         }
     }
 
+    Rectangle {
+        anchors.fill: parent
+        radius: 12
+        color: ma.containsMouse || clock.open
+            ? Qt.rgba(1, 1, 1, 0.12) : "transparent"
+        Behavior on color { ColorAnimation { duration: 120 } }
+    }
+
     Row {
         id: row
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.centerIn: parent
         spacing: 8
 
         Text {
@@ -38,5 +48,25 @@ Item {
             font.pixelSize: 13
             font.weight: Font.DemiBold
         }
+    }
+
+    Rectangle {
+        anchors.right: row.right
+        anchors.rightMargin: -4
+        anchors.top: row.top
+        anchors.topMargin: -2
+        width: 5
+        height: 5
+        radius: 2.5
+        color: "#FF6B5E"
+        visible: clock.unread > 0 && !clock.open
+    }
+
+    MouseArea {
+        id: ma
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: bridge.toggleCenter()
     }
 }

@@ -27,9 +27,15 @@ Qt Quick внутри процесса движка:
   `switchTo(n)`; `MerakiDock`: список окон из `IPC_GET_TREE` (id, hwnd,
   iconic), иконки, пины (`togglePin`, сохранение в `~/.swinewm/dock.json`),
   контекстное меню пина — отдельное popup-окно `dock/DockMenu.qml`
-  (`showMenu`, закрытие приложения — `[con_id=N] kill`)
-- `bridge.c` — поток-подписчик IPC (`SUBSCRIBE ["workspace","window"]`),
-  события кладёт в очередь, QML-поток забирает по таймеру;
+  (`showMenu`, закрытие приложения — `[con_id=N] kill`); `MerakiCenter`:
+  панель уведомлений `center/Center.qml` — активные + история из
+  `SWINE_IPC_GET_NOTIFICATIONS`/`_HISTORY`, закрытие —
+  `SWINE_IPC_CLOSE_NOTIFICATION`, тумблер — клик по часам (`toggleCenter`),
+  окно без региона ввода вне панели (клики мимо проходят в окна)
+- `bridge.c` — поток-подписчик IPC (`SUBSCRIBE
+  ["workspace","window","notification"]`), события кладёт в очередь,
+  QML-поток забирает по таймеру; notification-событие обновляет список
+  уведомлений;
 - `capture.cpp` — `Windows.Graphics.Capture`: `LiveThumb` (живое превью
   окна, кадры GPU -> staging -> QImage) и `MerakiFx` (джинн: оверлей на весь
   экран, стоп-кадр, `SW_MINIMIZE`/`SW_RESTORE` с отключённым DWM-переходом);

@@ -66,7 +66,7 @@ static DWORD WINAPI bridge_main(LPVOID arg) {
 			continue;
 		}
 		if (!ipc_send(connection, IPC_SUBSCRIBE,
-				"[\"workspace\",\"window\"]")) {
+				"[\"workspace\",\"window\",\"notification\"]")) {
 			ipc_close(connection);
 			Sleep(1000);
 			continue;
