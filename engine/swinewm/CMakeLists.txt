@@ -193,12 +193,14 @@ if(WIN32)
     qt_add_resources(swinewm "meraki_qml" PREFIX "/qml" FILES
       ${MERAKI_QML_ROOT}/Meraki/Main.qml
       ${MERAKI_QML_ROOT}/Meraki/Bar.qml
+      ${MERAKI_QML_ROOT}/Meraki/BarMenu.qml
       ${MERAKI_QML_ROOT}/Meraki/Tray.qml
       ${MERAKI_QML_ROOT}/Meraki/Workspaces.qml
       ${MERAKI_QML_ROOT}/Meraki/Clock.qml
       ${MERAKI_QML_ROOT}/Meraki/MinimizeFx.qml
       ${MERAKI_QML_ROOT}/Meraki/glass/LiquidGlass.qml
       ${MERAKI_QML_ROOT}/Meraki/glass/DockGlassPanel.qml
+      ${MERAKI_QML_ROOT}/Meraki/glass/MenuBorder.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/Dock.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/DockIcon.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/DockTip.qml

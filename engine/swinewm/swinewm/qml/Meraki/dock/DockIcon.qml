@@ -77,7 +77,11 @@ Item {
             }
             if (cell.isRunning) {
                 var w = cell.modelData.wins[0]
-                if (typeof fx !== "undefined" && fx && w.window > 0) {
+                if (w.id < 0) {
+                    // Свёрнутое окно из EnumWindows: движок им больше не
+                    // управляет, восстанавливаем напрямую.
+                    bridge.restoreWindow(w.window)
+                } else if (typeof fx !== "undefined" && fx && w.window > 0) {
                     var tr = root.slotRect(cell.index)
                     if (w.iconic) {
                         fx.beginRestore(w.window, w.id, tr.x, tr.y, tr.width, tr.height)

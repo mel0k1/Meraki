@@ -23,6 +23,7 @@ Rectangle {
             anchors.fill: parent
             source: bridge.wallpaper
             fillMode: Image.PreserveAspectCrop
+            asynchronous: true
         }
 
         Repeater {
@@ -163,16 +164,41 @@ Rectangle {
                             anchors.topMargin: 10
                             spacing: 7
 
-                            Image {
+                            Item {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 width: 52
                                 height: 52
-                                source: "image://appicon/" + modelData.icon
-                                sourceSize: Qt.size(96, 96)
-                                fillMode: Image.PreserveAspectFit
-                                smooth: true
-                                mipmap: true
-                                asynchronous: true
+
+                                // Пока иконка грузится в фоне — нейтральная
+                                // плитка с первой буквой.
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 11
+                                    visible: img.status !== Image.Ready
+                                    color: Qt.rgba(1, 1, 1, 0.10)
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: modelData.name.length > 0
+                                            ? modelData.name.charAt(0).toUpperCase() : "?"
+                                        color: Qt.rgba(1, 1, 1, 0.75)
+                                        font.family: "SF Pro Display"
+                                        font.pixelSize: 22
+                                        font.weight: Font.DemiBold
+                                    }
+                                }
+
+                                Image {
+                                    id: img
+
+                                    anchors.fill: parent
+                                    source: "image://appicon/" + modelData.icon
+                                    sourceSize: Qt.size(96, 96)
+                                    fillMode: Image.PreserveAspectFit
+                                    smooth: true
+                                    mipmap: true
+                                    asynchronous: true
+                                }
                             }
 
                             Text {

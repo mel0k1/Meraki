@@ -79,6 +79,7 @@ Item {
         id: bblur
         sourceItem: bblurFx
         live: glass.visible
+        mipmap: true
         visible: false
     }
 
@@ -98,6 +99,7 @@ Item {
         id: bblur2
         sourceItem: glass.bn > 1.0 ? bblur2Fx : null
         live: glass.visible
+        mipmap: true
         visible: false
     }
 
@@ -149,8 +151,17 @@ Item {
         visible: !glass.shaderOk
         anchors.fill: parent
         radius: glass.cornerRadius
-        color: glass.dark ? Qt.rgba(0.10, 0.10, 0.11, 0.55) : Qt.rgba(1, 1, 1, 0.45)
-        border.width: 0.25
-        border.color: Qt.rgba(1, 1, 1, 0.10)
+        color: glass.dark ? Qt.rgba(0.10, 0.10, 0.11, 0.42)
+                          : Qt.rgba(1, 1, 1, 0.42 * 0.55)
+        border.width: 0
+
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius - 0.35
+            color: "transparent"
+            border.width: 0.25
+            border.color: glass.dark ? Qt.rgba(1, 1, 1, 0.06)
+                                     : Qt.rgba(1, 1, 1, 0.12)
+        }
     }
 }

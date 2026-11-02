@@ -131,6 +131,7 @@ Item {
             anchors.fill: parent
             source: bridge.wallpaper
             fillMode: Image.PreserveAspectCrop
+            asynchronous: true
         }
 
         Repeater {
@@ -168,6 +169,17 @@ Item {
         dark: true
         glassBlur: 13
         captureWidth: root.totalW0 + 2 * root.hPad + root.iconSize * (root.effMag - 1) * 3.6
+    }
+
+    // Кромка дока: тёмный контур снаружи + линия в цвете обоев (MacShell).
+    MenuBorder {
+        x: slab.x
+        y: slab.y
+        width: slab.width
+        height: slab.height
+        cornerR: 18
+        dark: true
+        outline: false
     }
 
     Row {

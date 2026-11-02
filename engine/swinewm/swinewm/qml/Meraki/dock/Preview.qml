@@ -12,6 +12,8 @@ Item {
     readonly property bool shown: slot !== null && slot.wins.length > 0 &&
         slot.wins[clamped].window > 0
     readonly property var win: shown ? slot.wins[clamped] : null
+    // Свёрнутое окно не захватить живьём: показываем иконку приложения.
+    readonly property bool iconic: shown && panel.win.id < 0
     readonly property bool multi: shown && slot.wins.length > 1
     property int winIndex: 0
 
@@ -55,14 +57,42 @@ Item {
             margins: 8
         }
         height: 116
-        hwnd: panel.win ? panel.win.window : 0
-        visible: panel.shown
+        hwnd: panel.win && !panel.iconic ? panel.win.window : 0
+        visible: panel.shown && !panel.iconic
 
         MouseArea {
             anchors.fill: parent
             enabled: panel.shown
             cursorShape: Qt.PointingHandCursor
             onClicked: bridge.focusWindow(panel.win.id)
+        }
+    }
+
+    Item {
+        anchors {
+            top: parent.top
+            left: parent.left
+            right: parent.right
+            margins: 8
+        }
+        height: 116
+        visible: panel.iconic
+
+        Image {
+            anchors.centerIn: parent
+            width: 72
+            height: 72
+            source: panel.slot ? "image://dockicon/" + panel.slot.key : ""
+            sourceSize: Qt.size(96, 96)
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            mipmap: true
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: bridge.restoreWindow(panel.win.window)
         }
     }
 
@@ -93,7 +123,13 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: bridge.closeWindow(panel.win.id)
+            onClicked: {
+                if (panel.win.id < 0) {
+                    bridge.closeHwnd(-panel.win.id)
+                } else {
+                    bridge.closeWindow(panel.win.id)
+                }
+            }
         }
     }
 

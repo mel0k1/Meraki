@@ -9,7 +9,7 @@ Item {
     height: 22
 
     property string timeText: Qt.formatDateTime(new Date(), "HH:mm")
-    property string dateText: Qt.formatDateTime(new Date(), "d MMM")
+    property string dateText: Qt.formatDateTime(new Date(), "ddd d MMM")
     property bool open: bridge.centerOpen
     property int unread: bridge.centerCount
 
@@ -20,7 +20,7 @@ Item {
         triggeredOnStart: true
         onTriggered: {
             clock.timeText = Qt.formatDateTime(new Date(), "HH:mm")
-            clock.dateText = Qt.formatDateTime(new Date(), "d MMM")
+            clock.dateText = Qt.formatDateTime(new Date(), "ddd d MMM")
         }
     }
 

@@ -10,6 +10,11 @@
 #include <propkey.h>
 #include <propsys.h>
 #include <shobjidl_core.h>
+#include <dwmapi.h>
+
+#ifndef DWMWA_CLOAKED
+#define DWMWA_CLOAKED 14
+#endif
 
 #include <QDateTime>
 #include <QDir>
@@ -26,11 +31,14 @@
 #include <QMutex>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickAsyncImageProvider>
 #include <QQuickImageProvider>
 #include <QQuickView>
 #include <QRect>
+#include <QRunnable>
 #include <QScreen>
 #include <QSurfaceFormat>
+#include <QThreadPool>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantMap>
@@ -479,62 +487,107 @@ static QString meraki_known_dir(REFKNOWNFOLDERID id) {
         return out;
 }
 
+// Обои для стекла оболочки: движок пишет фактический путь в
+// .swinewm\wallpaper.txt (могут быть "output * bg" из конфига), иначе —
+// системные обои Windows.
+static QUrl meraki_wallpaper_url() {
+        const QString base = qEnvironmentVariable("USERPROFILE");
+        if (!base.isEmpty()) {
+                QFile f(base + "/.swinewm/wallpaper.txt");
+                if (f.open(QIODevice::ReadOnly)) {
+                        const QString path =
+                                QString::fromUtf8(f.readAll().trimmed());
+                        if (!path.isEmpty() && QFile::exists(path)) {
+                                return QUrl::fromLocalFile(path);
+                        }
+                }
+        }
+        wchar_t wp[MAX_PATH] = {};
+        if (SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wp, 0)
+                && wp[0]) {
+                return QUrl::fromLocalFile(QString::fromWCharArray(wp));
+        }
+        return QUrl();
+}
+
 static std::map<QString, QString> g_appicon_paths;
+static QMutex g_appicon_mutex;
 
-class AppIconProvider : public QQuickImageProvider {
+// Достаём иконку .lnk в рабочем потоке: SHGetFileInfo с SHIL_JUMBO может
+// занять секунды (сетевые ярлыки, dllhost), и на GUI-потоке это вешало всю
+// оболочку при открытии Launchpad.
+static QImage meraki_appicon_image(const QString &path) {
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        QImage out;
+        SHFILEINFOW sfi = {};
+        if (SHGetFileInfoW((LPCWSTR)path.utf16(), 0, &sfi, sizeof(sfi),
+                SHGFI_SYSICONINDEX)) {
+                IImageList *list = nullptr;
+                if (SUCCEEDED(SHGetImageList(SHIL_JUMBO, IID_IImageList,
+                        (void **)&list))) {
+                        HICON icon = nullptr;
+                        list->GetIcon(sfi.iIcon, ILD_TRANSPARENT, &icon);
+                        list->Release();
+                        if (icon) {
+                                out = meraki_hicon_to_image(icon);
+                                DestroyIcon(icon);
+                        }
+                }
+        }
+        CoUninitialize();
+        return out;
+}
+
+class AppIconResponse : public QQuickImageResponse, public QRunnable {
 public:
-        AppIconProvider() : QQuickImageProvider(QQuickImageProvider::Pixmap) {}
+        AppIconResponse(const QString &id, const QSize &requested) :
+                m_id(id), m_requested(requested) {
+                setAutoDelete(true);
+        }
 
-        QPixmap requestPixmap(const QString &id, QSize *size,
-                const QSize &requested) override {
-                QPixmap pm;
-                auto it = m_cache.find(id);
-                if (it != m_cache.end()) {
-                        pm = it->second;
-                } else {
-                        auto pathIt = g_appicon_paths.find(id);
-                        if (pathIt != g_appicon_paths.end()) {
-                                SHFILEINFOW sfi = {};
-                                if (SHGetFileInfoW((LPCWSTR)pathIt->second.utf16(),
-                                        0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX)) {
-                                        IImageList *list = nullptr;
-                                        if (SUCCEEDED(SHGetImageList(SHIL_JUMBO,
-                                                IID_IImageList, (void **)&list))) {
-                                                HICON icon = nullptr;
-                                                list->GetIcon(sfi.iIcon,
-                                                        ILD_TRANSPARENT, &icon);
-                                                list->Release();
-                                                if (icon) {
-                                                        QImage img = meraki_hicon_to_image(icon);
-                                                        DestroyIcon(icon);
-                                                        if (!img.isNull()) {
-                                                                pm = QPixmap::fromImage(img);
-                                                        }
-                                                }
-                                        }
-                                }
+        QQuickTextureFactory *textureFactory() const override {
+                return QQuickTextureFactory::textureFactoryForImage(m_image);
+        }
+
+        void run() override {
+                QString path;
+                {
+                        QMutexLocker lock(&g_appicon_mutex);
+                        auto it = g_appicon_paths.find(m_id);
+                        if (it != g_appicon_paths.end()) {
+                                path = it->second;
                         }
-                        if (pm.isNull()) {
-                                pm = meraki_icon_for(QStringLiteral("unknown"));
-                        }
-                        if (m_cache.size() > 512) {
-                                m_cache.clear();
-                        }
-                        m_cache[id] = pm;
                 }
-                if (size) {
-                        *size = pm.size();
+                QImage img;
+                if (!path.isEmpty()) {
+                        img = meraki_appicon_image(path);
                 }
-                if (requested.isValid() && requested.width() > 0 &&
-                        requested.height() > 0) {
-                        return pm.scaled(requested, Qt::KeepAspectRatio,
+                if (img.isNull()) {
+                        img = meraki_hicon_to_image(nullptr);
+                }
+                if (m_requested.isValid() && m_requested.width() > 0
+                        && m_requested.height() > 0) {
+                        img = img.scaled(m_requested, Qt::KeepAspectRatio,
                                 Qt::SmoothTransformation);
                 }
-                return pm;
+                m_image = img;
+                emit finished();
         }
 
 private:
-        std::map<QString, QPixmap> m_cache;
+        QString m_id;
+        QSize m_requested;
+        QImage m_image;
+};
+
+class AppIconProvider : public QQuickAsyncImageProvider {
+public:
+        QQuickImageResponse *requestImageResponse(const QString &id,
+                const QSize &requested) override {
+                AppIconResponse *response = new AppIconResponse(id, requested);
+                QThreadPool::globalInstance()->start(response);
+                return response;
+        }
 };
 
 static MerakiFx *g_fx = nullptr;
@@ -562,6 +615,9 @@ class MerakiDock : public QObject {
         Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
         Q_PROPERTY(QVariantList pins READ pins NOTIFY pinsChanged)
         Q_PROPERTY(QVariantMap launching READ launching NOTIFY launchingChanged)
+        Q_PROPERTY(QString focusedKey READ focusedKey NOTIFY windowsChanged)
+        Q_PROPERTY(QString focusedTitle READ focusedTitle NOTIFY windowsChanged)
+        Q_PROPERTY(qint64 focusedHwnd READ focusedHwnd NOTIFY windowsChanged)
         Q_PROPERTY(int screenWidth READ screenWidth CONSTANT)
         Q_PROPERTY(int screenHeight READ screenHeight CONSTANT)
         Q_PROPERTY(QUrl wallpaper READ wallpaper CONSTANT)
@@ -594,12 +650,7 @@ public:
                 m_screenY = g.y();
                 m_screenWidth = g.width();
                 m_screenHeight = g.height();
-                wchar_t wp[MAX_PATH] = {};
-                SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wp, 0);
-                QString wall = QString::fromWCharArray(wp);
-                if (!wall.isEmpty()) {
-                        m_wallpaper = QUrl::fromLocalFile(wall);
-                }
+                m_wallpaper = meraki_wallpaper_url();
 
                 m_view = new QQuickView();
                 m_view->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
@@ -633,6 +684,18 @@ public:
 
         QVariantMap launching() const {
                 return m_launching;
+        }
+
+        QString focusedKey() const {
+                return m_focusedKey;
+        }
+
+        QString focusedTitle() const {
+                return m_focusedTitle;
+        }
+
+        qint64 focusedHwnd() const {
+                return m_focusedHwnd;
         }
 
         bool owns(QScreen *screen) const {
@@ -733,10 +796,52 @@ public:
                 for (const QVariant &v : m_windows) {
                         const QVariantMap w = v.toMap();
                         if (w.value("appId").toString().toLower() == lower) {
-                                runCommand("[con_id=" + std::to_string(
-                                        (long long)w.value("id").toLongLong()) + "] kill");
+                                const long long id =
+                                        w.value("id").toLongLong();
+                                if (id < 0) {
+                                        closeHwnd(-id);
+                                } else {
+                                        runCommand("[con_id=" + std::to_string(
+                                                id) + "] kill");
+                                }
                         }
                 }
+        }
+
+        // Свернуть/развернуть/закрыть по HWND: работает и для свёрнутых окон,
+        // которые движок уже не управляет (дерево их теряет).
+        Q_INVOKABLE void restoreWindow(qint64 hwnd) {
+                if (hwnd <= 0) {
+                        return;
+                }
+                ShowWindow((HWND)(size_t)hwnd, SW_RESTORE);
+                SetForegroundWindow((HWND)(size_t)hwnd);
+        }
+
+        Q_INVOKABLE void minimizeWindow(qint64 hwnd) {
+                if (hwnd > 0) {
+                        ShowWindow((HWND)(size_t)hwnd, SW_MINIMIZE);
+                }
+        }
+
+        Q_INVOKABLE void closeHwnd(qint64 hwnd) {
+                if (hwnd > 0) {
+                        PostMessageW((HWND)(size_t)hwnd, WM_CLOSE, 0, 0);
+                }
+        }
+
+        Q_INVOKABLE void minimizeFocused() {
+                if (m_focusedHwnd > 0) {
+                        ShowWindow((HWND)(size_t)m_focusedHwnd, SW_MINIMIZE);
+                }
+        }
+
+        Q_INVOKABLE void toggleFullscreenFocused() {
+                runCommand("fullscreen toggle");
+        }
+
+        Q_INVOKABLE void toggleFloatFocused() {
+                runCommand("floating toggle");
         }
 
         Q_INVOKABLE void showMenu(const QString &key, const QString &name,
@@ -843,6 +948,115 @@ public slots:
                         }
                 };
                 walk(document.object());
+
+                // Свёрнутые окна движок снимает с управления и из дерева
+                // убирает (EVENT_SYSTEM_MINIMIZESTART -> view_unmap), поэтому
+                // док их терял. Добавляем их из EnumWindows: appId по AUMID/
+                // имени exe — как у управляемых, id отрицательный (–hwnd),
+                // клики по ним идут через ShowWindow, а не через IPC.
+                QVariantList extra_windows;
+                std::map<long long, bool> known;
+                for (const QVariant &v : list) {
+                        known.insert({ v.toMap().value("window").toLongLong(),
+                                true });
+                }
+                EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+                        auto *extra = (QVariantList *)lp;
+                        if (!IsWindowVisible(hwnd) || !IsIconic(hwnd)) {
+                                return TRUE;
+                        }
+                        if (GetAncestor(hwnd, GA_ROOT) != hwnd) {
+                                return TRUE;
+                        }
+                        DWORD pid = 0;
+                        GetWindowThreadProcessId(hwnd, &pid);
+                        if (pid == GetCurrentProcessId()) {
+                                return TRUE;
+                        }
+                        LONG ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
+                        if (ex & WS_EX_TOOLWINDOW) {
+                                return TRUE;
+                        }
+                        DWORD cloaked = 0;
+                        if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
+                                        &cloaked, sizeof(cloaked))) && cloaked) {
+                                return TRUE;
+                        }
+                        wchar_t cls[64] = {};
+                        GetClassNameW(hwnd, cls, 64);
+                        if (wcscmp(cls, L"Shell_TrayWnd") == 0 ||
+                                wcscmp(cls, L"Progman") == 0 ||
+                                wcscmp(cls, L"WorkerW") == 0 ||
+                                wcscmp(cls, L"Windows.UI.Core.CoreWindow") == 0) {
+                                return TRUE;
+                        }
+                        QVariantMap w;
+                        const long long h = (long long)(intptr_t)hwnd;
+                        w.insert("id", (qlonglong)-h);
+                        w.insert("window", (qlonglong)h);
+                        w.insert("iconic", true);
+                        w.insert("focused", false);
+                        w.insert("urgent", false);
+                        wchar_t title[512] = {};
+                        GetWindowTextW(hwnd, title, 512);
+                        w.insert("title", QString::fromWCharArray(title));
+                        const QString aumid = meraki_aumid_for_hwnd(hwnd);
+                        if (aumid.contains('!')) {
+                                w.insert("appId", aumid);
+                        } else {
+                                HANDLE p = OpenProcess(
+                                        PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                        pid);
+                                if (p) {
+                                        wchar_t path[MAX_PATH];
+                                        DWORD sz = MAX_PATH;
+                                        if (QueryFullProcessImageNameW(p, 0,
+                                                path, &sz)) {
+                                                const QString full =
+                                                        QString::fromWCharArray(path);
+                                                w.insert("appId", full.section(
+                                                        '/', -1).section('\\', -1));
+                                        }
+                                        CloseHandle(p);
+                                }
+                                if (!w.contains("appId")) {
+                                        return TRUE;
+                                }
+                        }
+                        if (w.value("appId").toString().isEmpty()) {
+                                return TRUE;
+                        }
+                        extra->append(w);
+                        return TRUE;
+                }, (LPARAM)&extra_windows);
+                QVariantList merged;
+                for (const QVariant &v : list) {
+                        merged.append(v);
+                }
+                for (const QVariant &v : extra_windows) {
+                        if (!known.count(v.toMap().value("window").toLongLong())) {
+                                merged.append(v);
+                        }
+                }
+                list = merged;
+
+                QString focus_key;
+                QString focus_title;
+                long long focus_hwnd = 0;
+                for (const QVariant &v : list) {
+                        const QVariantMap w = v.toMap();
+                        if (w.value("focused").toBool()) {
+                                focus_key = w.value("appId").toString();
+                                focus_title = w.value("title").toString();
+                                focus_hwnd = w.value("window").toLongLong();
+                        }
+                }
+                if (focus_key != m_focusedKey || focus_title != m_focusedTitle
+                        || focus_hwnd != m_focusedHwnd) {
+                        m_focusedKey = focus_key;
+                        m_focusedTitle = focus_title;
+                        m_focusedHwnd = (qint64)focus_hwnd;
+                }
                 if (list != m_windows) {
                         m_windows = list;
                         emit windowsChanged();
@@ -1031,6 +1245,9 @@ private:
         qreal m_dockWidth = 0;
         qreal m_restHeight = 80;
         bool m_dockHovered = false;
+        QString m_focusedKey;
+        QString m_focusedTitle;
+        qint64 m_focusedHwnd = 0;
 };
 
 static MerakiDock *g_dock = nullptr;
@@ -1100,12 +1317,7 @@ public:
                         m_screenWidth = g.width();
                         m_screenHeight = g.height();
                 }
-                wchar_t wp[MAX_PATH] = {};
-                SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wp, 0);
-                QString wall = QString::fromWCharArray(wp);
-                if (!wall.isEmpty()) {
-                        m_wallpaper = QUrl::fromLocalFile(wall);
-                }
+                m_wallpaper = meraki_wallpaper_url();
                 m_view = new QQuickView();
                 m_view->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
                         Qt::Tool | Qt::NoDropShadowWindowHint);
@@ -1468,10 +1680,12 @@ public:
                         return;
                 }
                 ensureView();
-                scan();
+                // Открываем сразу со старым списком; сканирование и иконки
+                // грузятся в фоне (scan на GUI-потоке вешал оболочку).
                 m_view->show();
                 m_view->raise();
                 setOpen(true);
+                scanAsync();
         }
 
         Q_INVOKABLE void close() {
@@ -1513,12 +1727,7 @@ private:
                         m_screenWidth = g.width();
                         m_screenHeight = g.height();
                 }
-                wchar_t wp[MAX_PATH] = {};
-                SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wp, 0);
-                QString wall = QString::fromWCharArray(wp);
-                if (!wall.isEmpty()) {
-                        m_wallpaper = QUrl::fromLocalFile(wall);
-                }
+                m_wallpaper = meraki_wallpaper_url();
                 m_view = new QQuickView();
                 m_view->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
                         Qt::Tool | Qt::NoDropShadowWindowHint);
@@ -1540,7 +1749,26 @@ private:
                 });
         }
 
-        void scan() {
+        void scanAsync() {
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                if (m_scanBusy || (!m_apps.isEmpty() && now - m_scanStamp < 5000)) {
+                        return;
+                }
+                m_scanBusy = true;
+                m_scanStamp = now;
+                QThreadPool::globalInstance()->start([this]() {
+                        const QVariantList list = scanList();
+                        QMetaObject::invokeMethod(this, [this, list]() {
+                                m_scanBusy = false;
+                                if (list != m_apps) {
+                                        m_apps = list;
+                                }
+                                applyFilter();
+                        }, Qt::QueuedConnection);
+                });
+        }
+
+        QVariantList scanList() {
                 const QString dirs[] = { meraki_known_dir(FOLDERID_Programs),
                         meraki_known_dir(FOLDERID_CommonPrograms) };
                 QVariantList list;
@@ -1567,7 +1795,10 @@ private:
                                 seen[key] = true;
                                 const QString safe =
                                         "a" + QString::number(m_seq++);
-                                g_appicon_paths[safe] = path;
+                                {
+                                        QMutexLocker lock(&g_appicon_mutex);
+                                        g_appicon_paths[safe] = path;
+                                }
                                 QVariantMap app;
                                 app.insert("name", name);
                                 app.insert("path", path);
@@ -1582,12 +1813,7 @@ private:
                                                 .toString(),
                                                 Qt::CaseInsensitive) < 0;
                         });
-                if (list != m_apps) {
-                        m_apps = list;
-                        applyFilter();
-                } else {
-                        applyFilter();
-                }
+                return list;
         }
 
         void applyFilter() {
@@ -1629,6 +1855,8 @@ private:
         int m_screenWidth = 0;
         int m_screenHeight = 0;
         int m_seq = 1;
+        qint64 m_scanStamp = 0;
+        bool m_scanBusy = false;
         bool m_open = false;
 };
 
@@ -1658,12 +1886,7 @@ public:
 
         void show() {
                 loadConfig();
-                wchar_t wp[MAX_PATH] = {};
-                SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wp, 0);
-                QString wall = QString::fromWCharArray(wp);
-                if (!wall.isEmpty()) {
-                        m_wallpaper = QUrl::fromLocalFile(wall);
-                }
+                m_wallpaper = meraki_wallpaper_url();
                 if (QScreen *screen = QGuiApplication::primaryScreen()) {
                         const QRect g = screen->geometry();
                         m_screenWidth = g.width();
@@ -1960,15 +2183,40 @@ private:
 
 static MerakiWidgets *g_widgets = nullptr;
 
+// Состояние всплывающего меню верхней ленты: id меню + список пунктов
+// (label/act или {sep:true}); действия исполняет bridge.barAction().
+class MerakiBarMenu : public QObject {
+        Q_OBJECT
+        Q_PROPERTY(QString mid READ mid NOTIFY changed)
+        Q_PROPERTY(QVariantList items READ items NOTIFY changed)
+
+public:
+        explicit MerakiBarMenu(QObject *parent = nullptr) : QObject(parent) {}
+        QString m_id;
+        QVariantList m_items;
+
+        QString mid() const {
+                return m_id;
+        }
+
+        QVariantList items() const {
+                return m_items;
+        }
+
+signals:
+        void changed();
+};
+
 class MerakiBar : public QObject {
         Q_OBJECT
         Q_PROPERTY(QVariantList workspaces READ workspaces NOTIFY workspacesChanged)
+        Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
         Q_PROPERTY(QString activeName READ activeName NOTIFY workspacesChanged)
         Q_PROPERTY(bool centerOpen READ centerOpen NOTIFY centerChanged)
         Q_PROPERTY(int centerCount READ centerCount NOTIFY centerChanged)
         Q_PROPERTY(QVariantList trayItems READ trayItems NOTIFY trayChanged)
         Q_PROPERTY(int trayGen READ trayGen NOTIFY trayChanged)
-
+        Q_PROPERTY(QUrl wallpaper READ wallpaper CONSTANT)
 public:
         explicit MerakiBar(QObject *parent = nullptr) : QObject(parent) {
                 m_timer = new QTimer(this);
@@ -1978,6 +2226,7 @@ public:
         }
 
         void show() {
+                m_wallpaper = meraki_wallpaper_url();
                 const QList<QScreen *> screens = QGuiApplication::screens();
                 for (QScreen *screen : screens) {
                         addScreen(screen);
@@ -2002,14 +2251,16 @@ public slots:
                         Qt::NoDropShadowWindowHint);
                 view->setColor(Qt::transparent);
                 view->setResizeMode(QQuickView::SizeRootObjectToView);
+                const QRect geometry = screen->geometry();
                 view->rootContext()->setContextProperty("bridge", this);
                 view->rootContext()->setContextProperty("viewPrimary",
                         screen == QGuiApplication::primaryScreen());
+                view->rootContext()->setContextProperty("viewX", geometry.x());
+                view->rootContext()->setContextProperty("viewY", geometry.y());
                 view->engine()->addImageProvider("trayicon",
                         new TrayIconProvider());
                 view->setSource(QUrl(QStringLiteral(
                         "qrc:/qml/Meraki/Main.qml")));
-                const QRect geometry = screen->geometry();
                 view->setGeometry(geometry.x(), geometry.y(),
                         geometry.width(), 28);
                 view->show();
@@ -2030,6 +2281,14 @@ public slots:
 
         QVariantList workspaces() const {
                 return m_workspaces;
+        }
+
+        QVariantList windows() const {
+                return m_windowsCache;
+        }
+
+        QUrl wallpaper() const {
+                return m_wallpaper;
         }
 
         QString activeName() const {
@@ -2059,6 +2318,124 @@ public slots:
         Q_INVOKABLE void toggleApps() {
                 if (g_apps) {
                         g_apps->toggle();
+                }
+        }
+
+        // Меню верхней ленты: показать под пунктом (ax, ay — экранные).
+        Q_INVOKABLE void showBarMenu(const QString &id, qreal ax, qreal ay) {
+                ensureBarMenu();
+                m_barMenu->m_id = id;
+                m_barMenu->m_items = barMenuItems(id);
+                emit m_barMenu->changed();
+                const int w = 236;
+                int h = 14;
+                for (const QVariant &v : m_barMenu->items()) {
+                        h += v.toMap().contains("sep") ? 11 : 27;
+                }
+                h += 10;
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        const QRect g = screen->geometry();
+                        int x = int(ax) - 14;
+                        x = std::max(g.x() + 4, std::min(g.x() + g.width()
+                                - w - 4, x));
+                        m_barMenuView->setGeometry(x, int(ay) + 4, w, h);
+                }
+                m_barMenuView->raise();
+                m_barMenuView->show();
+        }
+
+        Q_INVOKABLE void barAction(const QString &act) {
+                hideBarMenu();
+                if (act == "launchpad") {
+                        if (g_apps) {
+                                g_apps->toggle();
+                        }
+                        return;
+                }
+                if (act == "center") {
+                        if (g_center) {
+                                g_center->toggle();
+                        }
+                        return;
+                }
+                if (act == "about") {
+                        meraki_open_url(
+                                "https://github.com/mel0k1/Meraki");
+                        return;
+                }
+                if (act == "config") {
+                        const QString path =
+                                meraki_home_dir() + "/.swinewm/config";
+                        if (QFileInfo::exists(path)) {
+                                meraki_open_url(path);
+                        }
+                        return;
+                }
+                if (act == "min") {
+                        if (g_dock) {
+                                g_dock->minimizeFocused();
+                        }
+                        return;
+                }
+                if (act == "close-app") {
+                        if (g_dock && !g_dock->focusedKey().isEmpty()) {
+                                g_dock->closeApp(g_dock->focusedKey());
+                        }
+                        return;
+                }
+                if (act == "fullscreen") {
+                        if (g_dock) {
+                                g_dock->toggleFullscreenFocused();
+                        }
+                        return;
+                }
+                if (act == "float") {
+                        if (g_dock) {
+                                g_dock->toggleFloatFocused();
+                        }
+                        return;
+                }
+                if (act == "term") {
+                        runCommand("exec cmd.exe");
+                        return;
+                }
+                if (act == "files") {
+                        runCommand("exec explorer.exe");
+                        return;
+                }
+                if (act.startsWith("ws")) {
+                        bool ok = false;
+                        const int num = act.mid(2).toInt(&ok);
+                        if (ok) {
+                                switchTo(num);
+                        }
+                        return;
+                }
+                if (act == "close-window") {
+                        if (!g_dock) {
+                                return;
+                        }
+                        for (const QVariant &v : g_dock->windows()) {
+                                const QVariantMap w = v.toMap();
+                                if (w.value("focused").toBool()) {
+                                        const long long id =
+                                                w.value("id").toLongLong();
+                                        if (id < 0) {
+                                                g_dock->closeHwnd(-id);
+                                        } else {
+                                                runCommand("[con_id=" +
+                                                        std::to_string(id) +
+                                                        "] kill");
+                                        }
+                                }
+                        }
+                        return;
+                }
+        }
+
+        Q_INVOKABLE void hideBarMenu() {
+                if (m_barMenuView) {
+                        m_barMenuView->hide();
                 }
         }
 
@@ -2106,6 +2483,36 @@ public slots:
         }
 
         void poll() {
+                // Имя активного приложения в ленте (как в macOS): следим за
+                // сфокусированным окном дока, не только за воркспейсами.
+                if (g_dock) {
+                        const QString key = g_dock->focusedKey();
+                        const QVariantList wins = g_dock->windows();
+                        if (wins != m_windowsCache) {
+                                m_windowsCache = wins;
+                                emit windowsChanged();
+                        }
+                        QString name;
+                        if (key.isEmpty()) {
+                                name = QStringLiteral("Рабочий стол");
+                        } else {
+                                name = g_dock->appName(key);
+                                if (name.isEmpty() || name == key) {
+                                        name = key;
+                                        if (name.endsWith(".exe",
+                                                Qt::CaseInsensitive)) {
+                                                name.chop(4);
+                                        }
+                                        if (!name.isEmpty()) {
+                                                name[0] = name[0].toUpper();
+                                        }
+                                }
+                        }
+                        if (name != m_activeName) {
+                                m_activeName = name;
+                                emit workspacesChanged();
+                        }
+                }
                 bool got = false;
                 for (;;) {
                         uint32_t type = 0;
@@ -2180,17 +2587,12 @@ public slots:
                         list.append(workspace);
                 }
                 m_workspaces = list;
-                for (const QVariant &item : list) {
-                        const QVariantMap workspace = item.toMap();
-                        if (workspace.value("focused").toBool()) {
-                                m_activeName = workspace.value("name").toString();
-                        }
-                }
                 emit workspacesChanged();
         }
 
 signals:
         void workspacesChanged();
+        void windowsChanged();
         void centerChanged();
         void trayChanged();
 
@@ -2199,10 +2601,102 @@ private:
                 meraki_ipc_command(command.c_str());
         }
 
+        static void meraki_open_url(const QString &path) {
+                const std::wstring p = path.toStdWString();
+                SHELLEXECUTEINFOW info = {};
+                info.cbSize = sizeof(info);
+                info.lpFile = p.c_str();
+                info.nShow = SW_SHOWNORMAL;
+                ShellExecuteExW(&info);
+        }
+
+        // Пункты меню ленты; act исполняет barAction().
+        QVariantList barMenuItems(const QString &id) const {
+                QVariantList items;
+                auto row = [&items](const QString &label, const QString &act) {
+                        QVariantMap m;
+                        m.insert("label", label);
+                        m.insert("act", act);
+                        items.append(m);
+                };
+                auto sep = [&items]() {
+                        QVariantMap m;
+                        m.insert("sep", true);
+                        items.append(m);
+                };
+                if (id == "logo") {
+                        row(QStringLiteral("О Meraki"), "about");
+                        row(QStringLiteral("Launchpad"), "launchpad");
+                        row(QStringLiteral("Центр уведомлений"), "center");
+                        sep();
+                        row(QStringLiteral("Открыть конфиг"), "config");
+                } else if (id == "app") {
+                        row(QStringLiteral("Свернуть окно"), "min");
+                        row(QStringLiteral("Закрыть окно"), "close-window");
+                        sep();
+                        row(QStringLiteral("Завершить приложение"), "close-app");
+                } else if (id == "file") {
+                        row(QStringLiteral("Launchpad"), "launchpad");
+                        row(QStringLiteral("Центр уведомлений"), "center");
+                        sep();
+                        row(QStringLiteral("Терминал"), "term");
+                        row(QStringLiteral("Проводник"), "files");
+                } else if (id == "view") {
+                        row(QStringLiteral("Полный экран"), "fullscreen");
+                        row(QStringLiteral("Плавающее окно"), "float");
+                        sep();
+                        row(QStringLiteral("Рабочий стол 1"), "ws1");
+                        row(QStringLiteral("Рабочий стол 2"), "ws2");
+                        row(QStringLiteral("Рабочий стол 3"), "ws3");
+                } else if (id == "window") {
+                        row(QStringLiteral("Свернуть окно"), "min");
+                        row(QStringLiteral("Закрыть окно"), "close-window");
+                        sep();
+                        row(QStringLiteral("Центр уведомлений"), "center");
+                } else if (id == "help") {
+                        row(QStringLiteral("О Meraki"), "about");
+                        row(QStringLiteral("Конфигурация"), "config");
+                }
+                return items;
+        }
+
+        void ensureBarMenu() {
+                if (m_barMenuView) {
+                        return;
+                }
+                m_barMenu = new MerakiBarMenu(this);
+                m_barMenuView = new QQuickView();
+                m_barMenuView->setFlags(Qt::FramelessWindowHint |
+                        Qt::WindowStaysOnTopHint | Qt::Tool |
+                        Qt::NoDropShadowWindowHint);
+                m_barMenuView->setColor(Qt::transparent);
+                m_barMenuView->setResizeMode(QQuickView::SizeRootObjectToView);
+                m_barMenuView->rootContext()->setContextProperty("bridge",
+                        this);
+                m_barMenuView->rootContext()->setContextProperty("barmenu",
+                        m_barMenu);
+                m_barMenuView->setSource(QUrl(QStringLiteral(
+                        "qrc:/qml/Meraki/BarMenu.qml")));
+                QObject::connect(m_barMenuView, &QQuickWindow::activeChanged,
+                        this, [this]() {
+                                if (m_barMenuView && !m_barMenuView->isActive()) {
+                                        m_barMenuView->hide();
+                                }
+                        });
+                if (m_barMenuView->rootObject()) {
+                        QObject::connect(m_barMenuView->rootObject(),
+                                SIGNAL(done()), this, SLOT(hideBarMenu()));
+                }
+        }
+
         QList<QScreen *> m_screens;
         QList<QQuickView *> m_views;
+        QQuickView *m_barMenuView = nullptr;
+        MerakiBarMenu *m_barMenu = nullptr;
         QTimer *m_timer = nullptr;
         QVariantList m_workspaces;
+        QVariantList m_windowsCache;
+        QUrl m_wallpaper;
         QString m_activeName;
         int m_centerCount = 0;
         bool m_centerOpen = false;

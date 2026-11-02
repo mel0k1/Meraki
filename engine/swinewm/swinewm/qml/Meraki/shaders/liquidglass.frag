@@ -1,4 +1,15 @@
 #version 440
+// Liquid Glass for the macdock Dock.
+//
+// Build:  qsb --qt6 -o liquidglass.frag.qsb liquidglass.frag
+// (shell.qml runs this automatically on first use and caches the result in ~/.config/macdock/)
+//
+// The shader treats the Dock as a slab of curved glass sitting on top of a live backdrop texture:
+//   * a rounded-rect signed distance field gives the distance to the edge and the edge direction
+//   * a convex "squircle" bezel profile turns that into a surface normal
+//   * Snell's law (refract) turns the normal into a lateral shift of the sampled backdrop
+//   * the backdrop is sampled per colour channel (dispersion) through a small disk blur
+//   * saturation / tint / milky lift, then specular rim, inner depth shading and a soft drop shadow
 
 layout(location = 0) in vec2 qt_TexCoord0;
 layout(location = 0) out vec4 fragColor;
@@ -6,27 +17,27 @@ layout(location = 0) out vec4 fragColor;
 layout(std140, binding = 0) uniform buf {
     mat4 qt_Matrix;
     float qt_Opacity;
-    vec2 itemSize;
-    vec2 glassSize;
-    vec2 srcSize;
-    vec2 srcOffset;
-    float pad;
-    float radius;
-    float bezel;
-    float thickness;
-    float dispersion;
-    float blurPx;
-    float tintMix;
-    float saturation;
-    float dark;
-    float debug;
-    float rim;
-    float grain;
-    float magnify;
-    float shadowAmt;
-    float rimTint;
-    float ringW;
-    float flatInner;
+    vec2 itemSize;      // whole shader item in px (glass + pad on every side)
+    vec2 glassSize;     // the Dock rectangle in px
+    vec2 srcSize;       // backdrop texture size in px
+    vec2 srcOffset;     // where the item's top-left sits inside the backdrop texture, px
+    float pad;          // item padding around the glass (room for the drop shadow)
+    float radius;       // corner radius, px
+    float bezel;        // width of the refracting rim, px
+    float thickness;    // how far the rim shifts the backdrop, px
+    float dispersion;   // chromatic split (0 = none)
+    float blurPx;       // backdrop blur radius, px
+    float tintMix;      // 0..1 amount of flat tint (the "translucency" slider)
+    float saturation;   // backdrop saturation boost
+    float dark;         // 0 = light mode, 1 = dark mode
+    float debug;        // 1 = show the raw backdrop texture (magenta = texture is empty)
+    float rim;          // specular edge highlight strength (1 = original strength)
+    float grain;        // fine noise amplitude over the whole glass
+    float magnify;      // vertical lens magnification of the whole slab
+    float shadowAmt;    // drop-shadow strength (1 = original, 0 = none) - appended last so older layouts stay compatible
+    float rimTint;      // 0 = white rim (Dock / Menu Bar), 1 = rim + border take a brighter shade of the glass's own colour (widgets)
+    float ringW;        // width in px of a thin border line along the very edge (0 = none)
+    float flatInner;    // 1 = no inner edge shading (the darker inner rim); 0 = original. Appended last, unset = 0
 };
 
 layout(binding = 1) uniform sampler2D src;
@@ -34,6 +45,17 @@ layout(binding = 1) uniform sampler2D src;
 const int   TAPS   = 24;
 const float GOLDEN = 2.39996323;
 
+// Natural blur, no "duplicated background" ghosts:
+//  * every tap reads a pre-blurred mip level sized to the gap between taps, so the taps overlap into one
+//    smooth surface instead of showing as separate copies of the content
+//  * Gaussian weights give a soft falloff instead of a hard disk edge
+//  * the tap pattern is rotated per pixel (interleaved gradient noise), so any leftover gaps turn into
+//    fine grain instead of repeating ghost lines
+//  * one shared pattern for all three colour channels (dispersion only shifts the centre)
+// Needs `mipmap: true` on the ShaderEffectSource (set in MacBar.qml / MacDock.qml).
+// The backdrop's alpha is carried through: a semi-transparent backdrop (a flat colour with alpha,
+// like the Settings back / forward pill) makes the glass itself semi-transparent; opaque backdrops
+// are unchanged.
 vec4 backdropLod(vec2 pItem, float lod)
 {
     vec2 uv = (pItem + srcOffset) / srcSize;
@@ -47,8 +69,8 @@ float ign(vec2 p)
 
 vec4 blurredDisp(vec2 pItem, vec2 disp, float disperse, float rad)
 {
-    float R   = max(rad, 0.5) * 1.5;
-    float gap = R * sqrt(3.14159265 / float(TAPS));
+    float R   = max(rad, 0.5) * 1.5;                       // Gaussian reaches further than a flat disk
+    float gap = R * sqrt(3.14159265 / float(TAPS));        // spacing between neighbouring taps, px
     float lod = clamp(log2(max(gap, 1.0)) + 0.35, 0.0, 6.0);
     float rot = ign(gl_FragCoord.xy) * 6.2831853;
     vec4  acc = vec4(0.0);
@@ -66,6 +88,7 @@ vec4 blurredDisp(vec2 pItem, vec2 disp, float disperse, float rad)
         acc  += c * w;
         wsum += w;
     }
+    // alpha from one extra tap at the centre (backdrops are smooth, so sampling it per tap would not change anything)
     float alpha = backdropLod(pItem, lod).a;
     return vec4(acc.rgb / wsum, alpha);
 }
@@ -90,8 +113,8 @@ void main()
     vec2 q  = p - vec2(pad) - hs;
     float r = min(radius, min(hs.x, hs.y));
 
-    float sd  = roundBox(q, hs, r);
-    float cov = clamp(0.5 - sd, 0.0, 1.0);
+    float sd  = roundBox(q, hs, r);               // < 0 inside the glass
+    float cov = clamp(0.5 - sd, 0.0, 1.0);        // anti-aliased coverage
 
     if (debug > 0.5) {
         vec4 s = texture(src, clamp((p + srcOffset) / srcSize, vec2(0.001), vec2(0.999)));
@@ -99,6 +122,7 @@ void main()
         return;
     }
 
+    // ── soft drop shadow (only visible outside the glass) ──
     float sds    = roundBox(q - vec2(0.0, 3.0), hs, r);
     float shadow = 0.30 * shadowAmt * (1.0 - smoothstep(-2.0, 9.0, sds));
     if (sd > 1.0) {
@@ -106,6 +130,7 @@ void main()
         return;
     }
 
+    // ── distance to edge + outward edge direction ──
     float t = max(-sd, 0.0);
     vec2 d2 = abs(q) - (hs - r);
     vec2 sg = vec2(q.x >= 0.0 ? 1.0 : -1.0, q.y >= 0.0 ? 1.0 : -1.0);
@@ -113,7 +138,8 @@ void main()
     vec2 g  = (length(m) > 1e-4) ? normalize(m) * sg
                                  : ((d2.x > d2.y) ? vec2(sg.x, 0.0) : vec2(0.0, sg.y));
 
-    float bz   = max(bezel, 1.0) * 1.45;
+    // ── convex squircle bezel → surface normal ──
+    float bz   = max(bezel, 1.0) * 1.45;           // wider bezel: the glass reads thicker
     float u    = clamp(t / bz, 0.0, 1.0);
     float om   = 1.0 - u;
     float om4  = om * om * om * om;
@@ -121,30 +147,38 @@ void main()
     slope = min(slope, 7.0);
     vec3 n = normalize(vec3(g * slope, 1.0));
 
+    // ── refraction: glass n≈1.5, ray enters straight down ──
     vec3 rd   = refract(vec3(0.0, 0.0, -1.0), n, 1.0 / 1.5);
     vec2 disp = rd.xy / max(-rd.z, 0.2) * thickness * 1.35;
 
+    // the whole slab acts as a gentle vertical lens; blur is crisper right at the curved rim
     vec2 ps = vec2(p.x, (p.y - pad - hs.y) * (1.0 - magnify * 1.5) + pad + hs.y);
     float rad = blurPx * mix(0.45, 1.0, smoothstep(0.0, bz, t));
 
+    // alpha of the backdrop decides how see-through the glass is; rgb comes back straight
+    // (divided through by alpha), so opaque backdrops (alpha 1) behave exactly as before
     vec4 b4    = blurredDisp(ps, disp, dispersion * 0.6, rad);
     float aBase = clamp(b4.a, 0.0, 1.0);
     vec3 col = b4.rgb / max(aBase, 1e-3);
 
+    // ── colour grading: vibrancy, tint, milky lift ──
     float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
     col = mix(vec3(l), col, saturation);
     vec3 tintC = mix(vec3(1.0), vec3(0.09, 0.09, 0.10), dark);
     col = mix(col, tintC, tintMix);
     col += mix(0.055, 0.020, dark);
 
+    // ── depth: soft top sheen, darker lower inner edge ──
     float ty = clamp((q.y + hs.y) / glassSize.y, 0.0, 1.0);
     col += (1.0 - ty) * mix(0.040, 0.030, dark);
     float innerK = 1.0 - clamp(flatInner, 0.0, 1.0);
     col *= 1.0 - 0.12 * exp(-t / 6.0) * clamp(g.y, 0.0, 1.0) * innerK;
-    col *= 1.0 - 0.10 * exp(-t / (bz * 0.45)) * innerK;
+    col *= 1.0 - 0.10 * exp(-t / (bz * 0.45)) * innerK;          // thick glass absorbs light toward the edge (heavier feel)
 
+    // colour of the rim / border: white, or (rimTint) a brighter shade of what the glass looks like at this spot
     vec3 rimCol = mix(vec3(0.96, 0.98, 1.0), clamp(col * 1.5 + 0.12, 0.0, 1.0), rimTint);
 
+    // ── specular rim, light from the top-left ──
     vec2  L      = normalize(vec2(-0.55, -0.83));
     float facing = dot(g, L);
     float spec   = pow(max(facing, 0.0), 1.6) + 0.55 * pow(max(-facing, 0.0), 2.2);
@@ -154,15 +188,20 @@ void main()
     edgeHi *= rim * mix(0.85, 1.0, dark);
     col += edgeHi * rimCol;
 
+    // meniscus: a soft second highlight inside the rim, like surface tension pulling the liquid together
     float mx  = (t - bz * 0.5) / (bz * 0.2 + 1.0);
     float men = exp(-mx * mx);
     col += men * 0.07 * (0.35 + spec) * rim * rimCol;
 
+    // thin border line right at the edge (anti-aliased), brighter on the lit side
     if (ringW > 0.0) {
         float ring = 1.0 - smoothstep(ringW * 0.5, ringW * 0.5 + 1.0, t);
         col = mix(col, rimCol, ring * (0.55 + 0.35 * clamp(facing * 0.5 + 0.5, 0.0, 1.0)));
     }
 
+    // ringW < 0: "corner light" border. A line (|ringW| px) that runs all the way round the glass and fades out only at the
+    // top-right and bottom-left corners, and takes a bright shade of the backdrop colour at that spot (dynamic: it follows what
+    // is behind the glass). Used by the Control Center; everything else keeps ringW >= 0 and is unchanged.
     if (ringW < 0.0) {
         float rw   = -ringW;
         float ring = 1.0 - smoothstep(rw * 0.5, rw * 0.5 + 1.0, t);
@@ -175,12 +214,13 @@ void main()
         col = mix(col, ringCol, clamp((ring + glow) * cw, 0.0, 1.0) * 0.95);
     }
 
+    // fine triangular-distribution grain, same on every channel so it reads as texture, not colour noise
     float gn = hash12(gl_FragCoord.xy) + hash12(gl_FragCoord.xy * 1.7 + 17.0) - 1.0;
     col += gn * grain;
 
     col = clamp(col, 0.0, 1.0);
 
-    float aGlass = cov * aBase;
+    float aGlass = cov * aBase;                    // the backdrop's transparency becomes the glass's
     float a = aGlass + shadow * (1.0 - aGlass);
-    fragColor = vec4(col * aGlass, a) * qt_Opacity;
+    fragColor = vec4(col * aGlass, a) * qt_Opacity;   // premultiplied alpha
 }
