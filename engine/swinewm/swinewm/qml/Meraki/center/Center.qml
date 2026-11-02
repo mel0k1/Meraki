@@ -256,10 +256,61 @@ Item {
                         font.pixelSize: 10
                         elide: Text.ElideRight
                     }
+
+                    // Действия уведомления (notify-send -A "ключ=Подпись"):
+                    // пилюли под текстом, клик вызывает действие.
+                    Row {
+                        visible: Object.keys(card.modelData.actions || {}).length > 0
+                        spacing: 6
+
+                        Repeater {
+                            model: Object.keys(card.modelData.actions || {})
+
+                            Rectangle {
+                                id: act
+
+                                required property string modelData
+
+                                width: actLbl.implicitWidth + 18
+                                height: 22
+                                radius: 11
+                                color: actMa.containsMouse
+                                    ? Qt.rgba(1, 1, 1, 0.22)
+                                    : Qt.rgba(1, 1, 1, 0.10)
+                                border.width: 1
+                                border.color: Qt.rgba(1, 1, 1, 0.14)
+                                Behavior on color { ColorAnimation { duration: 120 } }
+
+                                Text {
+                                    id: actLbl
+                                    anchors.centerIn: parent
+                                    text: card.modelData.actions[act.modelData]
+                                        || act.modelData
+                                    color: "#F2FFFFFF"
+                                    font.family: "SF Pro Display"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Medium
+                                }
+
+                                MouseArea {
+                                    id: actMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: bridge.invokeAction(
+                                        card.modelData.id, act.modelData)
+                                }
+                            }
+                        }
+                    }
                 }
 
+                // Вся карточка кликабельна (фокус приложения), но живёт под
+                // кнопками: крестик и действия объявлены позже и принимают
+                // клики первыми.
                 MouseArea {
                     id: ca
+                    z: -1
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor

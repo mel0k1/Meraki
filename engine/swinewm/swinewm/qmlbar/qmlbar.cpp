@@ -1209,6 +1209,27 @@ public:
                 refreshNotes();
         }
 
+        // Кнопка-действие на карточке: makoctl invoke -n <id> <action>.
+        Q_INVOKABLE void invokeAction(qint64 id, const QString &action) {
+                QJsonArray args;
+                args.append(QStringLiteral("invoke"));
+                args.append(QStringLiteral("-n"));
+                args.append(QString::number(id));
+                args.append(action);
+                const QByteArray payload =
+                        QJsonDocument(args).toJson(QJsonDocument::Compact);
+                char *error = nullptr;
+                char *reply = ipc_request(nullptr, SWINE_IPC_MAKOCTL,
+                        payload.constData(), &error);
+                if (reply) {
+                        free(reply);
+                }
+                if (error) {
+                        free(error);
+                }
+                refreshNotes();
+        }
+
         Q_INVOKABLE void clearAll() {
                 for (const QVariant &v : m_activeIds) {
                         closeNote(v.toLongLong());
@@ -1319,6 +1340,7 @@ private:
                         n.insert("summary", summary);
                         n.insert("body", body);
                         n.insert("urgency", o.value("urgency").toString());
+                        n.insert("actions", o.value("actions").toObject().toVariantMap());
                         n.insert("when", m_seen[id]);
                         index[id] = true;
                         items.append(n);

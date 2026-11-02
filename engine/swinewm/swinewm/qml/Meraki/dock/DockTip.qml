@@ -11,7 +11,8 @@ Item {
         && root.hoverKey === shownKey && canShow
     property string shownKey: ""
 
-    width: lbl.implicitWidth + 30
+    readonly property string label: item ? item.name : ""
+    width: Math.min(lbl.implicitWidth + 30, 240)
     height: 30
 
     x: Math.max(8, Math.min(root.width - width - 8, root.mx - width / 2))
@@ -29,7 +30,7 @@ Item {
 
     Timer {
         id: delay
-        interval: 320
+        interval: 260
         onTriggered: tip.shownKey = root.hoverKey
     }
 
@@ -65,11 +66,13 @@ Item {
         Text {
             id: lbl
             anchors.centerIn: parent
-            text: tip.item ? tip.item.name : ""
+            width: Math.min(implicitWidth, tip.width - 24)
+            text: tip.label
             color: "#F2FFFFFF"
             font.family: "SF Pro Display"
             font.pixelSize: 12
             font.weight: Font.Medium
+            elide: Text.ElideRight
         }
     }
 }
