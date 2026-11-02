@@ -193,9 +193,23 @@ if(WIN32)
     qt_add_shaders(swinewm "meraki_shaders" PREFIX "/shaders" FILES
       swinewm/qml/Meraki/shaders/liquidglass.frag
       swinewm/qml/Meraki/shaders/dockglass.frag)
-    qt_add_shaders(swinewm "meraki_shaders_genie" PREFIX "/shaders"
-      FILES swinewm/qml/Meraki/shaders/genie.frag
-      VERTEX swinewm/qml/Meraki/shaders/genie.vert)
+    set(GENIE_FRAG_QSB ${CMAKE_CURRENT_BINARY_DIR}/genie.frag.qsb)
+    set(GENIE_VERT_QSB ${CMAKE_CURRENT_BINARY_DIR}/genie.vert.qsb)
+    add_custom_command(OUTPUT ${GENIE_FRAG_QSB} ${GENIE_VERT_QSB}
+      COMMAND ${QT6_INSTALL_BINS}/qsb --qt6 -o ${GENIE_FRAG_QSB}
+        ${CMAKE_CURRENT_SOURCE_DIR}/swinewm/qml/Meraki/shaders/genie.frag
+      COMMAND ${QT6_INSTALL_BINS}/qsb --qt6 -o ${GENIE_VERT_QSB}
+        ${CMAKE_CURRENT_SOURCE_DIR}/swinewm/qml/Meraki/shaders/genie.vert
+      DEPENDS swinewm/qml/Meraki/shaders/genie.frag
+        swinewm/qml/Meraki/shaders/genie.vert
+      VERBATIM)
+    target_sources(swinewm PRIVATE ${GENIE_FRAG_QSB} ${GENIE_VERT_QSB})
+    set_source_files_properties(${GENIE_FRAG_QSB} PROPERTIES
+      QT_RESOURCE_ALIAS /shaders/genie.frag.qsb)
+    set_source_files_properties(${GENIE_VERT_QSB} PROPERTIES
+      QT_RESOURCE_ALIAS /shaders/genie.vert.qsb)
+    qt_add_resources(swinewm "meraki_genie_shaders" PREFIX "/shaders" FILES
+      ${GENIE_FRAG_QSB} ${GENIE_VERT_QSB})
     target_compile_definitions(swinewm PRIVATE MERAKI_QML)
     set_property(TARGET swinewm PROPERTY CXX_STANDARD 17)
     target_link_libraries(swinewm PRIVATE Qt6::Quick windowsapp)
