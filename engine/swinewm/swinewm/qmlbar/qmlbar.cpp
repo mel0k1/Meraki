@@ -647,6 +647,10 @@ public:
                 runCommand("[con_id=" + std::to_string(id) + "] focus");
         }
 
+        Q_INVOKABLE void closeWindow(qint64 id) {
+                runCommand("[con_id=" + std::to_string(id) + "] kill");
+        }
+
         Q_INVOKABLE QString appName(const QString &key) {
                 auto it = g_uwp_names.find(key);
                 return it != g_uwp_names.end() ? it->second : key;
