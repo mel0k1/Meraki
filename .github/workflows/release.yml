@@ -30,15 +30,17 @@ jobs:
           $qtBin = Join-Path $qtRoot "bin"
           $out = "pack/Meraki"
           New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item build/Release/swinewm.exe $out
           & (Join-Path $qtBin "windeployqt.exe") --release --no-translations `
-            --qmldir engine/swinewm/swinewm/qml build/Release/swinewm.exe
-          Copy-Item build/Release/swinewm.exe, build/Release/switcher.exe, `
-            build/Release/swinemenu.exe, build/Release/notify-send.exe, `
-            build/Release/makoctl.exe $out
+            --qmldir engine/swinewm/swinewm/qml (Join-Path $out "swinewm.exe")
+          if (-not (Test-Path (Join-Path $out "platforms/qwindows.dll"))) {
+            throw "qwindows.dll missing"
+          }
+          Copy-Item build/Release/switcher.exe, build/Release/swinemenu.exe, `
+            build/Release/notify-send.exe, build/Release/makoctl.exe $out
           Copy-Item build/Release/config $out
           Copy-Item build/Release/waybar, build/Release/mako, `
             build/Release/wallpapers $out -Recurse
-          Copy-Item build/Release/*.dll $out
           Copy-Item pack/README.txt $out
           Compress-Archive -Path pack/Meraki/* `
             -DestinationPath "Meraki-$($env:GITHUB_REF_NAME)-x64.zip" -Force
