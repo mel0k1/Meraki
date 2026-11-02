@@ -1,3 +1,14 @@
+// rwlock types need the POSIX 2008 feature level on Linux, the SRW ones
+// need windows.h on Windows; the rest of the file stays portable.
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
