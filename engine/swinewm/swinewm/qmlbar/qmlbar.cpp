@@ -230,6 +230,7 @@ class MerakiMenu : public QObject {
         Q_PROPERTY(bool running MEMBER m_running NOTIFY changed)
 
 public:
+        explicit MerakiMenu(QObject *parent = nullptr) : QObject(parent) {}
         QString m_key;
         QString m_name;
         bool m_pinned = false;
