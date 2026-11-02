@@ -40,6 +40,11 @@ using namespace winrt::Windows::Graphics::Capture;
 namespace wgdx = winrt::Windows::Graphics::DirectX;
 namespace wgd3d = winrt::Windows::Graphics::DirectX::Direct3D11;
 
+struct __declspec(uuid("a9b3d012-3df2-4ee3-b8d1-8695f457d3c1"))
+MerakiDxgiInterfaceAccess : public IUnknown {
+        virtual HRESULT STDMETHODCALLTYPE GetInterface(REFIID riid, void **ppv) = 0;
+};
+
 static winrt::com_ptr<ID3D11Device> capture_device() {
         static winrt::com_ptr<ID3D11Device> dev;
         static bool done = false;
@@ -161,7 +166,7 @@ bool Grabber::pump() {
                 }
                 UINT w = UINT(cs.Width < 1 ? 1 : cs.Width);
                 UINT h = UINT(cs.Height < 1 ? 1 : cs.Height);
-                auto access = last.Surface().as<wgd3d::IDirect3DDxgiInterfaceAccess>();
+                auto access = last.Surface().as<MerakiDxgiInterfaceAccess>();
                 winrt::com_ptr<ID3D11Texture2D> tex;
                 winrt::check_hresult(access->GetInterface(__uuidof(ID3D11Texture2D),
                         tex.put_void()));
