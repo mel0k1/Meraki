@@ -742,7 +742,8 @@ public:
         }
 
         Q_INVOKABLE void clearAll() {
-                for (const qlonglong id : m_activeIds) {
+                for (const QVariant &v : m_activeIds) {
+                        const qlonglong id = v.toLongLong();
                         char *error = nullptr;
                         char *reply = ipc_request(nullptr,
                                 SWINE_IPC_CLOSE_NOTIFICATION,
