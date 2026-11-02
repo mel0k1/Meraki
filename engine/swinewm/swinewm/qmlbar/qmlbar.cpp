@@ -366,7 +366,7 @@ static QPixmap meraki_icon_for(const QString &key) {
                 SHSTOCKICONINFO si = {};
                 si.cbSize = sizeof(si);
                 if (SUCCEEDED(SHGetStockIconInfo(k == QLatin1String("trash-full")
-                        ? SIID_RECYCLEBIN_FULL : SIID_RECYCLEBIN,
+                        ? SIID_RECYCLERFULL : SIID_RECYCLER,
                         SHGSI_ICON | SHGSI_LARGEICON, &si))) {
                         QImage img = meraki_hicon_to_image(si.hIcon);
                         DestroyIcon(si.hIcon);
