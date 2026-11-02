@@ -68,7 +68,20 @@ Item {
         cursorShape: Qt.PointingHandCursor
         onClicked: {
             if (cell.isRunning) {
-                bridge.focusWindow(cell.modelData.wins[0].id)
+                var w = cell.modelData.wins[0]
+                if (typeof fx !== "undefined" && fx && w.window > 0) {
+                    var t = root.slotRect(cell.index)
+                    if (w.iconic) {
+                        fx.beginRestore(w.window, w.id, t.x, t.y, t.width, t.height)
+                    } else if (w.focused) {
+                        fx.beginMinimize(w.window, w.id, w.x, w.y, w.w, w.h,
+                            t.x, t.y, t.width, t.height)
+                    } else {
+                        bridge.focusWindow(w.id)
+                    }
+                } else {
+                    bridge.focusWindow(w.id)
+                }
             } else if (cell.modelData.cmd !== "") {
                 bridge.launch(cell.modelData.cmd)
                 bridge.noteLaunch(cell.modelData.key)

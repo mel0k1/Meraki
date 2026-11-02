@@ -171,11 +171,12 @@ if(WIN32)
   if(MERAKI_QML)
     target_sources(swinewm PRIVATE
       swinewm/qmlbar/bridge.c
-      swinewm/qmlbar/qmlbar.cpp)
+      swinewm/qmlbar/qmlbar.cpp
+      swinewm/qmlbar/capture.cpp)
     set(MERAKI_QML_ROOT swinewm/qml)
     foreach(f Meraki/Main.qml Meraki/Bar.qml Meraki/Workspaces.qml Meraki/Clock.qml
-        Meraki/glass/LiquidGlass.qml Meraki/dock/Dock.qml Meraki/dock/DockIcon.qml
-        Meraki/dock/DockTip.qml)
+        Meraki/MinimizeFx.qml Meraki/glass/LiquidGlass.qml Meraki/dock/Dock.qml
+        Meraki/dock/DockIcon.qml Meraki/dock/DockTip.qml Meraki/dock/Preview.qml)
       set_source_files_properties(${MERAKI_QML_ROOT}/${f} PROPERTIES QT_RESOURCE_ALIAS ${f})
     endforeach()
     qt_add_resources(swinewm "meraki_qml" PREFIX "/qml" FILES
@@ -183,16 +184,21 @@ if(WIN32)
       ${MERAKI_QML_ROOT}/Meraki/Bar.qml
       ${MERAKI_QML_ROOT}/Meraki/Workspaces.qml
       ${MERAKI_QML_ROOT}/Meraki/Clock.qml
+      ${MERAKI_QML_ROOT}/Meraki/MinimizeFx.qml
       ${MERAKI_QML_ROOT}/Meraki/glass/LiquidGlass.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/Dock.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/DockIcon.qml
-      ${MERAKI_QML_ROOT}/Meraki/dock/DockTip.qml)
+      ${MERAKI_QML_ROOT}/Meraki/dock/DockTip.qml
+      ${MERAKI_QML_ROOT}/Meraki/dock/Preview.qml)
     qt_add_shaders(swinewm "meraki_shaders" PREFIX "/shaders" FILES
       swinewm/qml/Meraki/shaders/liquidglass.frag
       swinewm/qml/Meraki/shaders/dockglass.frag)
+    qt_add_shaders(swinewm "meraki_shaders_genie" PREFIX "/shaders"
+      FILES swinewm/qml/Meraki/shaders/genie.frag
+      VERTEX swinewm/qml/Meraki/shaders/genie.vert)
     target_compile_definitions(swinewm PRIVATE MERAKI_QML)
     set_property(TARGET swinewm PROPERTY CXX_STANDARD 17)
-    target_link_libraries(swinewm PRIVATE Qt6::Quick)
+    target_link_libraries(swinewm PRIVATE Qt6::Quick windowsapp)
   endif()
 
   # The bar's CSS engine and per-pixel alpha drawing, for wofi's style.css.

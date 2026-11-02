@@ -36,6 +36,12 @@ Item {
         rebuild()
     }
 
+    function slotRect(index) {
+        return Qt.rect(refLeft + index * (iconSize + spacing),
+                       bridge.screenHeight - margin - bottomPad - iconSize,
+                       iconSize, iconSize)
+    }
+
     function windowsFor(key) {
         var out = []
         var ws = bridge.windows
@@ -162,4 +168,6 @@ Item {
     }
 
     DockTip {}
+
+    Preview {}
 }

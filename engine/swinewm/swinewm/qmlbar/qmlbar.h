@@ -12,6 +12,7 @@ void meraki_qml_stop(void);
 void meraki_bridge_start(void);
 void meraki_bridge_stop(void);
 int meraki_bridge_pop(uint32_t *type, char **payload);
+void meraki_ipc_command(const char *cmd);
 
 #ifdef __cplusplus
 }

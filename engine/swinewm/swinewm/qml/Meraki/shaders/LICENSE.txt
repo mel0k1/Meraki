@@ -1,5 +1,5 @@
-liquidglass.frag and dockglass.frag are ported from MacShell
-(https://github.com/0-ss/MacShell), MIT License:
+liquidglass.frag, dockglass.frag, genie.vert and genie.frag are ported from
+MacShell (https://github.com/0-ss/MacShell), MIT License:
 
 MIT License
 

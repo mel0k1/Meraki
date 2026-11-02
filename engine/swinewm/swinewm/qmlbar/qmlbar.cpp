@@ -17,6 +17,7 @@
 #include <QJsonObject>
 #include <QMetaObject>
 #include <QQmlContext>
+#include <QQmlEngine>
 #include <QQuickImageProvider>
 #include <QQuickView>
 #include <QRect>
@@ -25,6 +26,8 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVariantMap>
+
+#include "capture.h"
 
 #include <algorithm>
 #include <cmath>
@@ -37,6 +40,17 @@ extern "C" {
 #include "ipc-client.h"
 #include "ipc.h"
 #include "qmlbar.h"
+}
+
+extern "C" void meraki_ipc_command(const char *cmd) {
+        char *error = nullptr;
+        char *reply = ipc_request(nullptr, IPC_COMMAND, cmd, &error);
+        if (reply) {
+                free(reply);
+        }
+        if (error) {
+                free(error);
+        }
 }
 
 static QString meraki_home_dir() {
@@ -206,6 +220,8 @@ public:
         }
 };
 
+static MerakiFx *g_fx = nullptr;
+
 class MerakiDock : public QObject {
         Q_OBJECT
         Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
@@ -254,6 +270,9 @@ public:
                 m_view->setColor(Qt::transparent);
                 m_view->setResizeMode(QQuickView::SizeRootObjectToView);
                 m_view->rootContext()->setContextProperty("bridge", this);
+                if (g_fx) {
+                        m_view->rootContext()->setContextProperty("fx", g_fx);
+                }
                 m_view->engine()->addImageProvider("dockicon", new DockIconProvider());
                 m_view->setSource(QUrl(QStringLiteral("qrc:/qml/Meraki/dock/Dock.qml")));
                 const int h = 132;
@@ -326,6 +345,13 @@ public slots:
                                 w.insert("y", rect.value("y").toInt());
                                 w.insert("w", rect.value("width").toInt());
                                 w.insert("h", rect.value("height").toInt());
+                                const long long hwnd =
+                                        (long long)o.value("window").toDouble();
+                                w.insert("window", hwnd);
+                                if (hwnd > 0) {
+                                        w.insert("iconic",
+                                                IsIconic((HWND)(size_t)hwnd) != FALSE);
+                                }
                                 const long long pid = (long long)o.value("pid").toDouble();
                                 if (pid > 0) {
                                         HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
@@ -407,14 +433,7 @@ signals:
 
 private:
         static void runCommand(const std::string &cmd) {
-                char *error = nullptr;
-                char *reply = ipc_request(nullptr, IPC_COMMAND, cmd.c_str(), &error);
-                if (reply) {
-                        free(reply);
-                }
-                if (error) {
-                        free(error);
-                }
+                meraki_ipc_command(cmd.c_str());
         }
 
         void loadPins() {
@@ -584,14 +603,7 @@ signals:
 
 private:
         static void runCommand(const std::string &command) {
-                char *error = nullptr;
-                char *reply = ipc_request(nullptr, IPC_COMMAND, command.c_str(), &error);
-                if (reply) {
-                        free(reply);
-                }
-                if (error) {
-                        free(error);
-                }
+                meraki_ipc_command(command.c_str());
         }
 
         QQuickView *m_view = nullptr;
@@ -609,6 +621,10 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         char *argv[] = {nullptr};
         QGuiApplication app(argc, argv);
         g_app = &app;
+        qmlRegisterType<LiveThumb>("Meraki", 1, 0, "LiveThumb");
+        MerakiFx fx;
+        g_fx = &fx;
+        fx.show();
         MerakiBar bar;
         bar.show();
         MerakiDock dock;
@@ -617,6 +633,7 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         app.exec();
         g_dock = nullptr;
         g_app = nullptr;
+        g_fx = nullptr;
         return 0;
 }
 
