@@ -466,6 +466,74 @@ static void meraki_tray_snapshot(void) {
         g_tray_json = data;
 }
 
+static QString meraki_known_dir(REFKNOWNFOLDERID id) {
+        PWSTR raw = nullptr;
+        QString out;
+        if (SUCCEEDED(SHGetKnownFolderPath(id, 0, nullptr, &raw)) && raw) {
+                out = QString::fromWCharArray(raw);
+                CoTaskMemFree(raw);
+        }
+        return out;
+}
+
+static std::map<QString, QString> g_appicon_paths;
+
+class AppIconProvider : public QQuickImageProvider {
+public:
+        AppIconProvider() : QQuickImageProvider(QQuickImageProvider::Pixmap) {}
+
+        QPixmap requestPixmap(const QString &id, QSize *size,
+                const QSize &requested) override {
+                QPixmap pm;
+                auto it = m_cache.find(id);
+                if (it != m_cache.end()) {
+                        pm = it->second;
+                } else {
+                        auto pathIt = g_appicon_paths.find(id);
+                        if (pathIt != g_appicon_paths.end()) {
+                                SHFILEINFOW sfi = {};
+                                if (SHGetFileInfoW((LPCWSTR)pathIt->second.utf16(),
+                                        0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX)) {
+                                        IImageList *list = nullptr;
+                                        if (SUCCEEDED(SHGetImageList(SHIL_JUMBO,
+                                                IID_IImageList, (void **)&list))) {
+                                                HICON icon = nullptr;
+                                                list->GetIcon(sfi.iIcon,
+                                                        ILD_TRANSPARENT, &icon);
+                                                list->Release();
+                                                if (icon) {
+                                                        QImage img = meraki_hicon_to_image(icon);
+                                                        DestroyIcon(icon);
+                                                        if (!img.isNull()) {
+                                                                pm = QPixmap::fromImage(img);
+                                                        }
+                                                }
+                                        }
+                                }
+                        }
+                        if (pm.isNull()) {
+                                pm = meraki_icon_for(QStringLiteral("unknown"));
+                        }
+                        if (m_cache.size() > 512) {
+                                m_cache.clear();
+                        }
+                        m_cache[id] = pm;
+                }
+                if (size) {
+                        *size = pm.size();
+                }
+                if (requested.isValid() && requested.width() > 0 &&
+                        requested.height() > 0) {
+                        return pm.scaled(requested, Qt::KeepAspectRatio,
+                                Qt::SmoothTransformation);
+                }
+                return pm;
+        }
+
+private:
+        std::map<QString, QPixmap> m_cache;
+};
+
 static MerakiFx *g_fx = nullptr;
 
 class MerakiMenu : public QObject {
@@ -1189,6 +1257,227 @@ private:
 
 static MerakiCenter *g_center = nullptr;
 
+class MerakiApps : public QObject {
+        Q_OBJECT
+        Q_PROPERTY(QVariantList filtered READ filtered NOTIFY filteredChanged)
+        Q_PROPERTY(bool open READ isOpen NOTIFY openChanged)
+        Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY filteredChanged)
+        Q_PROPERTY(int screenWidth READ screenWidth CONSTANT)
+        Q_PROPERTY(int screenHeight READ screenHeight CONSTANT)
+        Q_PROPERTY(QUrl wallpaper READ wallpaper CONSTANT)
+        Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
+
+public:
+        explicit MerakiApps(QObject *parent = nullptr) : QObject(parent) {}
+
+        QVariantList filtered() const {
+                return m_filtered;
+        }
+
+        bool isOpen() const {
+                return m_open;
+        }
+
+        QString query() const {
+                return m_query;
+        }
+
+        void setQuery(const QString &q) {
+                if (m_query == q) {
+                        return;
+                }
+                m_query = q;
+                applyFilter();
+        }
+
+        int screenWidth() const {
+                return m_screenWidth;
+        }
+
+        int screenHeight() const {
+                return m_screenHeight;
+        }
+
+        QUrl wallpaper() const {
+                return m_wallpaper;
+        }
+
+        QVariantList windows() const {
+                return g_dock ? g_dock->windows() : QVariantList();
+        }
+
+        Q_INVOKABLE void toggle() {
+                if (m_open) {
+                        setOpen(false);
+                        return;
+                }
+                ensureView();
+                scan();
+                m_view->show();
+                m_view->raise();
+                setOpen(true);
+        }
+
+        Q_INVOKABLE void close() {
+                setOpen(false);
+        }
+
+        Q_INVOKABLE void launchFirst() {
+                if (!m_filtered.isEmpty()) {
+                        openApp(m_filtered.first().toMap()
+                                .value("path").toString());
+                }
+        }
+
+        Q_INVOKABLE void openApp(const QString &path) {
+                setOpen(false);
+                if (path.isEmpty()) {
+                        return;
+                }
+                const std::wstring p = path.toStdWString();
+                SHELLEXECUTEINFOW info = {};
+                info.cbSize = sizeof(info);
+                info.lpFile = p.c_str();
+                info.nShow = SW_SHOWNORMAL;
+                ShellExecuteExW(&info);
+        }
+
+signals:
+        void filteredChanged();
+        void openChanged();
+        void windowsChanged();
+
+private:
+        void ensureView() {
+                if (m_view) {
+                        return;
+                }
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        const QRect g = screen->geometry();
+                        m_screenWidth = g.width();
+                        m_screenHeight = g.height();
+                }
+                wchar_t wp[MAX_PATH] = {};
+                SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wp, 0);
+                QString wall = QString::fromWCharArray(wp);
+                if (!wall.isEmpty()) {
+                        m_wallpaper = QUrl::fromLocalFile(wall);
+                }
+                m_view = new QQuickView();
+                m_view->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
+                        Qt::Tool | Qt::NoDropShadowWindowHint);
+                m_view->setColor(Qt::transparent);
+                m_view->setResizeMode(QQuickView::SizeRootObjectToView);
+                m_view->rootContext()->setContextProperty("bridge", this);
+                m_view->engine()->addImageProvider("appicon",
+                        new AppIconProvider());
+                m_view->setSource(QUrl(QStringLiteral(
+                        "qrc:/qml/Meraki/apps/Launchpad.qml")));
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        const QRect g = screen->geometry();
+                        m_view->setGeometry(g);
+                }
+                QObject::connect(m_view, &QQuickWindow::activeChanged, this, [this]() {
+                        if (m_view && m_open && !m_view->isActive()) {
+                                setOpen(false);
+                        }
+                });
+        }
+
+        void scan() {
+                const QString dirs[] = { meraki_known_dir(FOLDERID_Programs),
+                        meraki_known_dir(FOLDERID_CommonPrograms) };
+                QVariantList list;
+                std::map<QString, bool> seen;
+                for (const QString &dir : dirs) {
+                        if (dir.isEmpty()) {
+                                continue;
+                        }
+                        QDirIterator it(dir, {"*.lnk", "*.url"}, QDir::Files,
+                                QDirIterator::Subdirectories);
+                        while (it.hasNext()) {
+                                const QString path = it.next();
+                                const QString name =
+                                        QFileInfo(path).completeBaseName();
+                                const QString key = name.toLower();
+                                if (name.isEmpty() || seen.count(key) ||
+                                        path.contains("/startup/",
+                                                Qt::CaseInsensitive) ||
+                                        path.contains(QString::fromUtf8(
+                                                "/автозагрузка/"),
+                                                Qt::CaseInsensitive)) {
+                                        continue;
+                                }
+                                seen[key] = true;
+                                const QString safe =
+                                        "a" + QString::number(m_seq++);
+                                g_appicon_paths[safe] = path;
+                                QVariantMap app;
+                                app.insert("name", name);
+                                app.insert("path", path);
+                                app.insert("icon", safe);
+                                list.append(app);
+                        }
+                }
+                std::sort(list.begin(), list.end(),
+                        [](const QVariant &a, const QVariant &b) {
+                                return a.toMap().value("name").toString()
+                                        .compare(b.toMap().value("name")
+                                                .toString(),
+                                                Qt::CaseInsensitive) < 0;
+                        });
+                if (list != m_apps) {
+                        m_apps = list;
+                        applyFilter();
+                } else {
+                        applyFilter();
+                }
+        }
+
+        void applyFilter() {
+                QVariantList list;
+                const QString needle = m_query.trimmed();
+                for (const QVariant &v : m_apps) {
+                        const QVariantMap a = v.toMap();
+                        if (needle.isEmpty() || a.value("name").toString()
+                                .contains(needle, Qt::CaseInsensitive)) {
+                                list.append(a);
+                        }
+                }
+                if (list != m_filtered) {
+                        m_filtered = list;
+                        emit filteredChanged();
+                }
+        }
+
+        void setOpen(bool open) {
+                if (m_open == open) {
+                        return;
+                }
+                m_open = open;
+                emit openChanged();
+                if (!open) {
+                        QTimer::singleShot(200, this, [this]() {
+                                if (!m_open && m_view) {
+                                        m_view->hide();
+                                }
+                        });
+                }
+        }
+
+        QQuickView *m_view = nullptr;
+        QVariantList m_apps;
+        QVariantList m_filtered;
+        QString m_query;
+        QUrl m_wallpaper;
+        int m_screenWidth = 0;
+        int m_screenHeight = 0;
+        int m_seq = 1;
+        bool m_open = false;
+};
+
+static MerakiApps *g_apps = nullptr;
+
 class MerakiBar : public QObject {
         Q_OBJECT
         Q_PROPERTY(QVariantList workspaces READ workspaces NOTIFY workspacesChanged)
@@ -1255,6 +1544,12 @@ public:
         Q_INVOKABLE void toggleCenter() {
                 if (g_center) {
                         g_center->toggle();
+                }
+        }
+
+        Q_INVOKABLE void toggleApps() {
+                if (g_apps) {
+                        g_apps->toggle();
                 }
         }
 
@@ -1416,7 +1711,10 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         MerakiCenter center;
         g_center = &center;
         center.init();
+        MerakiApps apps;
+        g_apps = &apps;
         app.exec();
+        g_apps = nullptr;
         g_bar = nullptr;
         g_center = nullptr;
         g_dock = nullptr;

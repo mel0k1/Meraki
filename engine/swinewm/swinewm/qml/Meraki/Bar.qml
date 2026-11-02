@@ -17,10 +17,42 @@ Rectangle {
     border.color: "#26FFFFFF"
     border.width: 1
 
-    Workspaces {
+    Item {
+        id: appsBtn
+
+        width: 24
+        height: 24
         anchors {
             left: parent.left
             leftMargin: 12
+            verticalCenter: parent.verticalCenter
+        }
+
+        Repeater {
+            model: 9
+            Rectangle {
+                width: 4
+                height: 4
+                radius: 2
+                color: btnMa.containsMouse ? "#FFFFFF" : "#C8FFFFFF"
+                x: 3 + (index % 3) * 7
+                y: 3 + Math.floor(index / 3) * 7
+            }
+        }
+
+        MouseArea {
+            id: btnMa
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: bridge.toggleApps()
+        }
+    }
+
+    Workspaces {
+        anchors {
+            left: parent.left
+            leftMargin: 46
             verticalCenter: parent.verticalCenter
         }
     }
