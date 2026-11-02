@@ -1,0 +1,70 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.3"
+          arch: win64_msvc2019_64
+          modules: qtshadertools
+          cache: true
+      - name: configure
+        run: cmake -S engine/swinewm -B build -A x64 -DCMAKE_PREFIX_PATH="$env:Qt6_DIR"
+      - name: build
+        run: cmake --build build --config Release -j
+      - name: deploy
+        shell: pwsh
+        run: |
+          $qtBin = Join-Path (Resolve-Path (Join-Path $env:Qt6_DIR "..\..\..")) "bin"
+          $out = "pack/Meraki"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          & (Join-Path $qtBin "windeployqt.exe") --release --no-translations `
+            --qmldir engine/swinewm/swinewm/qml build/Release/swinewm.exe
+          Copy-Item build/Release/swinewm.exe, build/Release/switcher.exe, `
+            build/Release/swinemenu.exe, build/Release/notify-send.exe, `
+            build/Release/makoctl.exe $out
+          Copy-Item build/Release/config $out
+          Copy-Item build/Release/waybar, build/Release/mako, `
+            build/Release/wallpapers $out -Recurse
+          Copy-Item build/Release/*.dll $out
+          Copy-Item pack/README.txt $out
+          Compress-Archive -Path pack/Meraki/* `
+            -DestinationPath "Meraki-$($env:GITHUB_REF_NAME)-x64.zip" -Force
+      - name: publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          ## Meraki $env:GITHUB_REF_NAME
+
+          Первая тестовая сборка: тайлинг-движок SwineWM и оболочка Meraki
+          (док с Liquid Glass, живые превью окон, генси-анимация, бар с
+          рабочими столами и часами, контекстное меню пинов).
+
+          ### Как попробовать
+
+          1. Распакуйте архив в любую папку.
+          2. Запустите `switcher.exe` и нажмите **«Поставить Meraki»** —
+             оболочка сменится сразу, Meraki пропишется как shell пользователя
+             (HKCU Winlogon, без прав администратора).
+          3. Вернуть всё как было — кнопка **«Вернуть Explorer»** в том же
+             switcher.exe.
+
+          Требования: Windows 10/11 x64. Исходники в engine/, детали порта —
+          в docs/port.md.
+          "@
+          $notes | Out-File notes.md -Encoding utf8
+          gh release create "$env:GITHUB_REF_NAME" `
+            "Meraki-$($env:GITHUB_REF_NAME)-x64.zip" `
+            --title "Meraki $env:GITHUB_REF_NAME" --notes-file notes.md
