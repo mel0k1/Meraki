@@ -1,5 +1,5 @@
 import QtQuick
-import "../glass"
+import "glass"
 
 // Верхняя лента в стиле MacShell (порт MacBar): Liquid Glass полоса
 // во всю ширину, слева логотип-арка, имя активного приложения и меню,

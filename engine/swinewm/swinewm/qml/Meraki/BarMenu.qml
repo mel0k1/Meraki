@@ -1,5 +1,5 @@
 import QtQuick
-import "../glass"
+import "glass"
 
 // Выпадающее меню верхней ленты: стеклянная панель (Liquid Glass),
 // как меню дока; пункты приходят от bridge (barmenu.items), клики
