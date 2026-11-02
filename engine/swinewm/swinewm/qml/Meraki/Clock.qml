@@ -1,7 +1,8 @@
 import QtQuick
 
 // Часы в стиле MacBar: дата приглушённым цветом, время полужирное,
-// пилюля при наведении, красная точка — счётчик уведомлений.
+// пилюля при наведении; клик — календарь-поповер, уведомления переехали
+// на колокольчик в Status.
 Item {
     id: clock
 
@@ -10,8 +11,6 @@ Item {
 
     property string timeText: Qt.formatDateTime(new Date(), "HH:mm")
     property string dateText: Qt.formatDateTime(new Date(), "ddd d MMM")
-    property bool open: bridge.centerOpen
-    property int unread: bridge.centerCount
 
     Timer {
         interval: 1000
@@ -29,8 +28,7 @@ Item {
         width: parent.width - 2
         height: parent.height - 4
         radius: 6
-        color: ma.containsMouse || clock.open
-            ? Qt.rgba(1, 1, 1, 0.14) : "transparent"
+        color: ma.containsMouse ? Qt.rgba(1, 1, 1, 0.14) : "transparent"
         Behavior on color { ColorAnimation { duration: 120 } }
     }
 
@@ -55,23 +53,14 @@ Item {
         }
     }
 
-    Rectangle {
-        anchors.right: row.right
-        anchors.rightMargin: -4
-        anchors.top: row.top
-        anchors.topMargin: -2
-        width: 5
-        height: 5
-        radius: 2.5
-        color: "#FF6B5E"
-        visible: clock.unread > 0 && !clock.open
-    }
-
     MouseArea {
         id: ma
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
-        onClicked: bridge.toggleCenter()
+        onClicked: {
+            var p = clock.mapToItem(null, 0, 0)
+            bridge.showCalendar(p.x + viewX, p.y + viewY + clock.height)
+        }
     }
 }

@@ -43,12 +43,17 @@ Rectangle {
         spacing: 2
 
         Repeater {
-            model: [
-                { label: menu.pinned ? "Открепить из Dock" : "Закрепить в Dock", act: "pin" },
-                { label: "Закрыть", act: "close" }
-            ].filter(function (it) {
-                return it.act !== "close" || menu.running
-            })
+            model: menu.key === "__trash__"
+                ? [
+                    { label: "Очистить корзину", act: "emptytrash" },
+                    { label: "Открыть", act: "opentrash" }
+                ]
+                : [
+                    { label: menu.pinned ? "Открепить из Dock" : "Закрепить в Dock", act: "pin" },
+                    { label: "Закрыть", act: "close" }
+                ].filter(function (it) {
+                    return it.act !== "close" || menu.running
+                })
 
             delegate: Rectangle {
                 id: itm
@@ -80,6 +85,10 @@ Rectangle {
                     onClicked: {
                         if (itm.modelData.act === "pin") {
                             bridge.togglePin(menu.key)
+                        } else if (itm.modelData.act === "emptytrash") {
+                            bridge.emptyTrash()
+                        } else if (itm.modelData.act === "opentrash") {
+                            bridge.openTrash()
                         } else {
                             bridge.closeApp(menu.key)
                         }

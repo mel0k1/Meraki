@@ -79,8 +79,11 @@ Item {
             var p = pins[i]
             var wins = windowsFor(p.key)
             seen[p.key.toLowerCase()] = true
-            list.push({ key: p.key, name: p.name, cmd: p.cmd, wins: wins, pinned: true })
+            list.push({ kind: "app", key: p.key, name: p.name,
+                cmd: p.cmd, wins: wins, pinned: true })
         }
+        // Запущенные непины — отдельной группой с разделителем (MacDock).
+        var running = []
         var ws2 = bridge.windows
         for (var j = 0; j < ws2.length; j++) {
             var k = ws2[j].appId
@@ -88,8 +91,18 @@ Item {
             var wl = windowsFor(k)
             if (wl.length === 0) continue
             seen[k.toLowerCase()] = true
-            list.push({ key: k, name: bridge.appName(k), cmd: "", wins: wl, pinned: false })
+            running.push({ kind: "app", key: k, name: bridge.appName(k),
+                cmd: "", wins: wl, pinned: false })
         }
+        if (running.length > 0) {
+            if (list.length > 0) list.push({ kind: "sep" })
+            list = list.concat(running)
+        }
+        list.push({ kind: "sep" })
+        list.push({ kind: "apps", key: "__apps__", name: "Программы",
+            wins: [], pinned: false })
+        list.push({ kind: "trash", key: "__trash__", name: "Корзина",
+            wins: [], pinned: false })
         items = list
     }
 

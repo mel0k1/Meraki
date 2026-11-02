@@ -179,11 +179,12 @@ if(WIN32)
       swinewm/qmlbar/capture.cpp
       swinewm/qmlbar/media.cpp)
     set(MERAKI_QML_ROOT swinewm/qml)
-    foreach(f Meraki/Main.qml Meraki/Bar.qml Meraki/Tray.qml Meraki/Workspaces.qml Meraki/Clock.qml
-        Meraki/MinimizeFx.qml Meraki/glass/LiquidGlass.qml
+    foreach(f Meraki/Main.qml Meraki/Bar.qml Meraki/Status.qml Meraki/Tray.qml Meraki/Workspaces.qml Meraki/Clock.qml
+        Meraki/MinimizeFx.qml Meraki/CalendarPop.qml
+        Meraki/glass/LiquidGlass.qml
         Meraki/glass/DockGlassPanel.qml Meraki/dock/Dock.qml
         Meraki/dock/DockIcon.qml Meraki/dock/DockTip.qml Meraki/dock/Preview.qml
-        Meraki/dock/DockMenu.qml Meraki/center/Center.qml
+        Meraki/dock/DockMenu.qml Meraki/center/Center.qml Meraki/center/Toast.qml
         Meraki/apps/Launchpad.qml Meraki/widgets/Widgets.qml
         Meraki/widgets/ClockCard.qml Meraki/widgets/CalendarCard.qml
         Meraki/widgets/WeatherCard.qml Meraki/widgets/MediaCard.qml
@@ -193,7 +194,9 @@ if(WIN32)
     qt_add_resources(swinewm "meraki_qml" PREFIX "/qml" FILES
       ${MERAKI_QML_ROOT}/Meraki/Main.qml
       ${MERAKI_QML_ROOT}/Meraki/Bar.qml
+      ${MERAKI_QML_ROOT}/Meraki/Status.qml
       ${MERAKI_QML_ROOT}/Meraki/BarMenu.qml
+      ${MERAKI_QML_ROOT}/Meraki/CalendarPop.qml
       ${MERAKI_QML_ROOT}/Meraki/Tray.qml
       ${MERAKI_QML_ROOT}/Meraki/Workspaces.qml
       ${MERAKI_QML_ROOT}/Meraki/Clock.qml
@@ -207,6 +210,7 @@ if(WIN32)
       ${MERAKI_QML_ROOT}/Meraki/dock/Preview.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/DockMenu.qml
       ${MERAKI_QML_ROOT}/Meraki/center/Center.qml
+      ${MERAKI_QML_ROOT}/Meraki/center/Toast.qml
       ${MERAKI_QML_ROOT}/Meraki/apps/Launchpad.qml
       ${MERAKI_QML_ROOT}/Meraki/widgets/Widgets.qml
       ${MERAKI_QML_ROOT}/Meraki/widgets/ClockCard.qml

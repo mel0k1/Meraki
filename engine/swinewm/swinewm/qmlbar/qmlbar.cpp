@@ -43,6 +43,10 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include <set>
+
+#include "swinewm/sysinfo.h"
+
 #include "capture.h"
 #include "media.h"
 
@@ -357,6 +361,22 @@ static QPixmap meraki_icon_for(const QString &key) {
                 return it->second;
         }
         QPixmap pm;
+        // Корзина в доке: системные иконки, полная и пустая.
+        if (k == QLatin1String("trash") || k == QLatin1String("trash-full")) {
+                SHSTOCKICONINFO si = {};
+                si.cbSize = sizeof(si);
+                if (SUCCEEDED(SHGetStockIconInfo(k == QLatin1String("trash-full")
+                        ? SIID_RECYCLEBIN_FULL : SIID_RECYCLEBIN,
+                        SHGSI_ICON | SHGSI_LARGEICON, &si))) {
+                        QImage img = meraki_hicon_to_image(si.hIcon);
+                        DestroyIcon(si.hIcon);
+                        if (!img.isNull()) {
+                                pm = QPixmap::fromImage(img);
+                        }
+                }
+                g_icon_cache[ks] = pm;
+                return pm;
+        }
         QString safe;
         for (const QChar &c : k) {
                 safe.append(c.isLetterOrNumber() ? c : QLatin1Char('_'));
@@ -610,6 +630,12 @@ signals:
         void changed();
 };
 
+class MerakiApps;
+
+// Переключить Launchpad из кода дока (ячейка «Программы»): определён
+// после класса MerakiApps, где уже известен g_apps.
+static void meraki_toggle_apps_impl();
+
 class MerakiDock : public QObject {
         Q_OBJECT
         Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
@@ -624,6 +650,7 @@ class MerakiDock : public QObject {
         Q_PROPERTY(qreal dockWidth MEMBER m_dockWidth)
         Q_PROPERTY(bool dockHovered MEMBER m_dockHovered)
         Q_PROPERTY(qreal dockRestHeight MEMBER m_restHeight)
+        Q_PROPERTY(bool trashFull READ trashFull NOTIFY trashChanged)
 
 public:
         explicit MerakiDock(QObject *parent = nullptr) : QObject(parent) {
@@ -844,6 +871,32 @@ public:
                 runCommand("floating toggle");
         }
 
+        // Ячейка «Программы» в доке — тот же Launchpad.
+        Q_INVOKABLE void openApps() {
+                meraki_toggle_apps_impl();
+        }
+
+        bool trashFull() const {
+                return m_trashFull;
+        }
+
+        Q_INVOKABLE void openTrash() {
+                SHELLEXECUTEINFOW info = {};
+                info.cbSize = sizeof(info);
+                info.lpFile = L"shell:RecycleBinFolder";
+                info.nShow = SW_SHOWNORMAL;
+                ShellExecuteExW(&info);
+        }
+
+        // «Очистить корзину»: подтверждение делает DockMenu, поэтому здесь
+        // без диалогов и без звука.
+        Q_INVOKABLE void emptyTrash() {
+                SHEmptyRecycleBinW(nullptr, nullptr,
+                        SHERB_NOCONFIRMATION | SHERB_NOSOUND
+                        | SHERB_NOPROGRESSUI);
+                pollTrash();
+        }
+
         Q_INVOKABLE void showMenu(const QString &key, const QString &name,
                 bool pinned, bool running, qreal ax, qreal ay) {
                 ensureMenuView();
@@ -875,6 +928,11 @@ public slots:
                 if (stamp != m_pinStamp) {
                         m_pinStamp = stamp;
                         reloadPins();
+                }
+                // Полный ли корзина: опрос раз в ~5 секунд (refresh зовётся
+                // и из таймера, и из poll ленты).
+                if (++m_trashTick % 30 == 1) {
+                        pollTrash();
                 }
                 char *error = nullptr;
                 char *payload = ipc_request(nullptr, IPC_GET_TREE, "", &error);
@@ -1117,6 +1175,7 @@ signals:
         void windowsChanged();
         void launchingChanged();
         void pinsChanged();
+        void trashChanged();
 
 private:
         static void runCommand(const std::string &cmd) {
@@ -1223,6 +1282,20 @@ private:
                 }
         }
 
+        // Заполнен ли корзина (SHQueryRecycleBin), с рассылкой в QML.
+        void pollTrash() {
+                bool full = false;
+                SHQUERYRBINFO rb = {};
+                rb.cbSize = sizeof(rb);
+                if (SUCCEEDED(SHQueryRecycleBinW(nullptr, &rb))) {
+                        full = rb.i64NumItems > 0;
+                }
+                if (full != m_trashFull) {
+                        m_trashFull = full;
+                        emit trashChanged();
+                }
+        }
+
         QQuickView *m_view = nullptr;
         QQuickView *m_menuView = nullptr;
         MerakiMenu *m_menu = nullptr;
@@ -1235,6 +1308,8 @@ private:
         QVariantList m_pins;
         QVariantMap m_launching;
         QUrl m_wallpaper;
+        bool m_trashFull = false;
+        int m_trashTick = 0;
         int m_screenX = 0;
         int m_screenY = 0;
         int m_screenWidth = 0;
@@ -1301,6 +1376,7 @@ class MerakiCenter : public QObject {
         Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
         Q_PROPERTY(qreal panelY MEMBER m_panelY)
         Q_PROPERTY(qreal panelH MEMBER m_panelH)
+        Q_PROPERTY(QVariantList toasts READ toasts NOTIFY toastsChanged)
 
 public:
         explicit MerakiCenter(QObject *parent = nullptr) : QObject(parent) {
@@ -1347,6 +1423,12 @@ public:
 
         QVariantList notes() const {
                 return m_notes;
+        }
+
+        // Тосты — карточки новых уведомлений справа под лентой (MacShell);
+        // живут 6 секунд, при наведении замирают, клик — действие.
+        QVariantList toasts() const {
+                return m_toasts;
         }
 
         int count() const {
@@ -1473,6 +1555,33 @@ public:
                 }
         }
 
+        // Тост сам истёк (6 с в QML).
+        Q_INVOKABLE void expireToast(qint64 id) {
+                removeToast(id);
+        }
+
+        // Клик по тосту: действие по умолчанию, иначе — фокус приложения.
+        Q_INVOKABLE void clickToast(qint64 id) {
+                QVariantMap found;
+                for (const QVariant &nv : m_toasts) {
+                        const QVariantMap n = nv.toMap();
+                        if (n.value("id").toLongLong() == id) {
+                                found = n;
+                                break;
+                        }
+                }
+                if (found.isEmpty()) {
+                        return;
+                }
+                const QVariantMap actions = found.value("actions").toMap();
+                if (!actions.isEmpty()) {
+                        invokeAction(id, actions.firstKey());
+                } else {
+                        focusApp(found.value("app").toString());
+                }
+                removeToast(id);
+        }
+
 public slots:
         void refreshNotes() {
                 QVariantList list;
@@ -1481,15 +1590,64 @@ public slots:
                 appendNotify(SWINE_IPC_GET_NOTIFICATIONS, list, index, true);
                 appendNotify(SWINE_IPC_GET_NOTIFICATION_HISTORY, list, index,
                         false);
+                // Тосты поднимают только новые активные уведомления; первое
+                // наполнение (при старте оболочки) историю не всплывает.
+                QVariantList fresh;
+                if (m_toastPrimed) {
+                        for (const QVariant &v : m_activeIds) {
+                                const qlonglong id = v.toLongLong();
+                                if (!m_knownActive.count(id)) {
+                                        fresh.append(id);
+                                }
+                        }
+                }
+                m_knownActive.clear();
+                for (const QVariant &v : m_activeIds) {
+                        m_knownActive.insert(v.toLongLong());
+                }
+                m_toastPrimed = true;
+                bool toastsDirty = false;
+                for (const QVariant &idv : fresh) {
+                        const qlonglong id = idv.toLongLong();
+                        for (const QVariant &nv : list) {
+                                const QVariantMap n = nv.toMap();
+                                if (n.value("id").toLongLong() == id) {
+                                        m_toasts.prepend(nv);
+                                        toastsDirty = true;
+                                        break;
+                                }
+                        }
+                }
+                while (m_toasts.size() > 4) {
+                        m_toasts.removeLast();
+                        toastsDirty = true;
+                }
+                // Уведомление закрыто в центре — тост за ним.
+                QVariantList alive;
+                for (const QVariant &nv : m_toasts) {
+                        const qlonglong id = nv.toMap().value("id").toLongLong();
+                        if (m_knownActive.count(id)) {
+                                alive.append(nv);
+                        } else {
+                                toastsDirty = true;
+                        }
+                }
+                if (alive.size() != m_toasts.size()) {
+                        m_toasts = alive;
+                }
                 if (list != m_notes) {
                         m_notes = list;
                         emit notesChanged();
+                }
+                if (toastsDirty) {
+                        syncToastWindow();
                 }
         }
 
 signals:
         void notesChanged();
         void openChanged();
+        void toastsChanged();
         void windowsChanged();
 
 private:
@@ -1574,7 +1732,15 @@ private:
                 }
                 m_open = open;
                 emit openChanged();
-                if (!open) {
+                if (open) {
+                        // Центр открылся — тосты «перетекают» в него (MacShell
+                        // merge): стек справа гасим сразу.
+                        if (!m_toasts.isEmpty()) {
+                                m_toasts.clear();
+                                emit toastsChanged();
+                                syncToastWindow();
+                        }
+                } else {
                         QTimer::singleShot(300, this, [this]() {
                                 if (!m_open && m_view) {
                                         m_view->hide();
@@ -1609,9 +1775,83 @@ private:
                         int(y1 * dpr), int(20 * dpr), int(20 * dpr)), FALSE);
         }
 
+        void removeToast(qint64 id) {
+                for (int i = 0; i < m_toasts.size(); ++i) {
+                        if (m_toasts.at(i).toMap().value("id").toLongLong()
+                                == id) {
+                                m_toasts.removeAt(i);
+                                syncToastWindow();
+                                return;
+                        }
+                }
+        }
+
+        // Окно тостов: узкий столбец справа под лентой, размер под стек.
+        // Окно не принимает фокус (WindowDoesNotAcceptFocus) — тосты не
+        // выбивают пользователя из приложения, но клики получают.
+        void ensureToastView() {
+                if (m_toastView) {
+                        return;
+                }
+                m_toastView = new QQuickView();
+                m_toastView->setFlags(Qt::FramelessWindowHint
+                        | Qt::WindowStaysOnTopHint | Qt::Tool
+                        | Qt::NoDropShadowWindowHint
+                        | Qt::WindowDoesNotAcceptFocus);
+                m_toastView->setColor(Qt::transparent);
+                m_toastView->setResizeMode(QQuickView::SizeRootObjectToView);
+                m_toastView->rootContext()->setContextProperty("bridge",
+                        this);
+                m_toastView->engine()->addImageProvider("dockicon",
+                        new DockIconProvider());
+                m_toastView->setSource(QUrl(QStringLiteral(
+                        "qrc:/qml/Meraki/center/Toast.qml")));
+        }
+
+        void syncToastWindow() {
+                ensureToastView();
+                emit toastsChanged();
+                if (m_toasts.isEmpty()) {
+                        m_toastView->hide();
+                        return;
+                }
+                const int n = m_toasts.size();
+                const int h = 24 + n * 96 + (n - 1) * 10;
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        const QRect g = screen->geometry();
+                        m_toastView->setGeometry(g.x() + g.width() - 384 - 12,
+                                g.y() + 34, 384, h);
+                }
+                m_toastView->raise();
+                m_toastView->show();
+                applyToastRegion();
+        }
+
+        // Регион ввода по карточкам: клики в прозрачных полях между тостами
+        // уходят в приложения под окном, как у layer-shell поверхностей
+        // MacShell. Заодно округляет края под радиус стекла.
+        void applyToastRegion() {
+                const qreal dpr = m_toastView->devicePixelRatio();
+                HRGN region = CreateRectRgn(0, 0, 0, 0);
+                for (int i = 0; i < m_toasts.size(); ++i) {
+                        const int top = int((12 + i * 106) * dpr);
+                        const int bottom = int((12 + i * 106 + 96) * dpr);
+                        HRGN card = CreateRoundRectRgn(int(12 * dpr), top,
+                                int(372 * dpr), bottom,
+                                int(22 * dpr), int(22 * dpr));
+                        CombineRgn(region, region, card, RGN_OR);
+                        DeleteObject(card);
+                }
+                SetWindowRgn((HWND)m_toastView->winId(), region, FALSE);
+        }
+
         QQuickView *m_view = nullptr;
+        QQuickView *m_toastView = nullptr;
         QTimer *m_regionTimer = nullptr;
         QVariantList m_notes;
+        QVariantList m_toasts;
+        std::set<qlonglong> m_knownActive;
+        bool m_toastPrimed = false;
         QVariantList m_windows;
         QVariantList m_activeIds;
         std::map<uint32_t, qint64> m_seen;
@@ -1861,6 +2101,12 @@ private:
 };
 
 static MerakiApps *g_apps = nullptr;
+
+static void meraki_toggle_apps_impl() {
+        if (g_apps) {
+                g_apps->toggle();
+        }
+}
 
 class MerakiWidgets : public QObject {
         Q_OBJECT
@@ -2217,6 +2463,7 @@ class MerakiBar : public QObject {
         Q_PROPERTY(QVariantList trayItems READ trayItems NOTIFY trayChanged)
         Q_PROPERTY(int trayGen READ trayGen NOTIFY trayChanged)
         Q_PROPERTY(QUrl wallpaper READ wallpaper CONSTANT)
+        Q_PROPERTY(QVariantMap status READ status NOTIFY statusChanged)
 public:
         explicit MerakiBar(QObject *parent = nullptr) : QObject(parent) {
                 m_timer = new QTimer(this);
@@ -2447,6 +2694,51 @@ public slots:
                 return m_trayGen;
         }
 
+        // Громкость/батарея/сеть для индикаторов справа в ленте.
+        QVariantMap status() const {
+                return m_status;
+        }
+
+        Q_INVOKABLE void volumeNudge(int delta) {
+                int pct = m_status.value("volume").toInt() + delta;
+                pct = std::max(0, std::min(100, pct));
+                sysinfo_audio_set_volume(false, pct);
+                updateStatus();
+        }
+
+        Q_INVOKABLE void volumeMute() {
+                sysinfo_audio_set_mute(false, -1);
+                updateStatus();
+        }
+
+        // Открыт ли бар-меню: соседние названия переключаются по ховеру,
+        // как hoverPop в MacBar.
+        Q_INVOKABLE bool barMenuOpen() const {
+                return m_barMenuView && m_barMenuView->isVisible();
+        }
+
+        // Календарь по клику на часы (поповер 320px, LiquidGlass).
+        Q_INVOKABLE void showCalendar(qreal ax, qreal ay) {
+                ensureCalendar();
+                const int w = 320;
+                const int h = 340;
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        const QRect g = screen->geometry();
+                        int x = int(ax) - w + 30;
+                        x = std::max(g.x() + 4, std::min(g.x() + g.width()
+                                - w - 4, x));
+                        m_calendarView->setGeometry(x, int(ay) + 4, w, h);
+                }
+                m_calendarView->raise();
+                m_calendarView->show();
+        }
+
+        Q_INVOKABLE void hideCalendar() {
+                if (m_calendarView) {
+                        m_calendarView->hide();
+                }
+        }
+
         Q_INVOKABLE void trayMouse(qint64 id, int button, bool down, qreal sx,
                 qreal sy) {
                 POINT p = { (long)sx, (long)sy };
@@ -2483,6 +2775,11 @@ public slots:
         }
 
         void poll() {
+                // Индикаторы статуса обновляются раз в ~2.4 с, а не в каждый
+                // тик: COM/сеть стоят дорого.
+                if (++m_pollTick % 20 == 1) {
+                        updateStatus();
+                }
                 // Имя активного приложения в ленте (как в macOS): следим за
                 // сфокусированным окном дока, не только за воркспейсами.
                 if (g_dock) {
@@ -2595,10 +2892,63 @@ signals:
         void windowsChanged();
         void centerChanged();
         void trayChanged();
+        void statusChanged();
 
 private:
         static void runCommand(const std::string &command) {
                 meraki_ipc_command(command.c_str());
+        }
+
+        // Снимок статуса в QVariantMap: громкость, батарея, сеть — из
+        // общих sysinfo-хелперов движка (те же, что у встроенного бара).
+        void updateStatus() {
+                QVariantMap st;
+                struct sysinfo_audio a = {};
+                if (sysinfo_audio(&a) && a.present) {
+                        st.insert("volume", a.volume);
+                        st.insert("muted", a.muted);
+                }
+                struct sysinfo_battery b = {};
+                if (sysinfo_battery(&b)) {
+                        QVariantMap bat;
+                        bat.insert("capacity", b.capacity);
+                        bat.insert("charging", b.charging);
+                        st.insert("battery", bat);
+                }
+                struct sysinfo_network n = {};
+                if (sysinfo_network(nullptr, &n) && n.found) {
+                        QVariantMap net;
+                        net.insert("up", n.connected);
+                        net.insert("wireless", n.wireless);
+                        st.insert("net", net);
+                }
+                if (st != m_status) {
+                        m_status = st;
+                        emit statusChanged();
+                }
+        }
+
+        void ensureCalendar() {
+                if (m_calendarView) {
+                        return;
+                }
+                m_calendarView = new QQuickView();
+                m_calendarView->setFlags(Qt::FramelessWindowHint
+                        | Qt::WindowStaysOnTopHint | Qt::Tool
+                        | Qt::NoDropShadowWindowHint);
+                m_calendarView->setColor(Qt::transparent);
+                m_calendarView->setResizeMode(QQuickView::SizeRootObjectToView);
+                m_calendarView->rootContext()->setContextProperty("bridge",
+                        this);
+                m_calendarView->setSource(QUrl(QStringLiteral(
+                        "qrc:/qml/Meraki/CalendarPop.qml")));
+                QObject::connect(m_calendarView,
+                        &QQuickWindow::activeChanged, this, [this]() {
+                                if (m_calendarView
+                                        && !m_calendarView->isActive()) {
+                                        m_calendarView->hide();
+                                }
+                        });
         }
 
         static void meraki_open_url(const QString &path) {
@@ -2692,12 +3042,15 @@ private:
         QList<QScreen *> m_screens;
         QList<QQuickView *> m_views;
         QQuickView *m_barMenuView = nullptr;
+        QQuickView *m_calendarView = nullptr;
         MerakiBarMenu *m_barMenu = nullptr;
         QTimer *m_timer = nullptr;
         QVariantList m_workspaces;
         QVariantList m_windowsCache;
         QUrl m_wallpaper;
         QString m_activeName;
+        QVariantMap m_status;
+        int m_pollTick = 0;
         int m_centerCount = 0;
         bool m_centerOpen = false;
         QVariantList m_trayItems;

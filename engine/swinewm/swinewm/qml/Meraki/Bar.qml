@@ -157,6 +157,16 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
+                    // hoverPop из MacBar: открытое меню переключается
+                    // наведением на соседние названия без клика.
+                    onEntered: {
+                        if (mt.modelData.id !== "logo"
+                                && bridge.barMenuOpen()) {
+                            var e = mt.mapToItem(null, 0, 0)
+                            bridge.showBarMenu(mt.modelData.id,
+                                e.x + viewX, e.y + viewY + mt.height)
+                        }
+                    }
                     onClicked: {
                         var p = mt.mapToItem(null, 0, 0)
                         bridge.showBarMenu(mt.modelData.id,
@@ -180,6 +190,12 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         height: 28
         spacing: 2
+
+        Loader {
+            anchors.verticalCenter: parent.verticalCenter
+            active: viewPrimary === true
+            sourceComponent: Status {}
+        }
 
         Loader {
             anchors.verticalCenter: parent.verticalCenter
