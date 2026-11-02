@@ -42,6 +42,7 @@ jobs:
           Copy-Item build/Release/waybar, build/Release/mako, `
             build/Release/wallpapers $out -Recurse
           Copy-Item pack/README.txt $out
+          Copy-Item pack/widgets.example.json $out
           Compress-Archive -Path pack/Meraki/* `
             -DestinationPath "Meraki-$($env:GITHUB_REF_NAME)-x64.zip" -Force
       - name: publish
@@ -56,11 +57,10 @@ jobs:
 
           ### Что нового
 
-          - Док с Liquid Glass: живые миниатюры окон (Windows.Graphics.Capture)
-            и генси-анимация сворачивания.
-          - Стеклянные тултипы пинов и центр уведомлений.
-          - Виджеты рабочего стола: часы, календарь, погода, медиа (SMTC).
-          - Трей в QML-баре, меню запуска (Launchpad), иконки UWP-приложений.
+          - Мультидисплей: бар с часами на каждом экране (трей — на основном),
+            док и виджеты на каждом мониторе.
+          - Настройка виджетов через `widgets.json`: какие карточки показывать,
+            размеры, сторона экрана, отступы, экраны, единицы погоды.
 
           ### Как попробовать
 
@@ -70,6 +70,9 @@ jobs:
              (HKCU Winlogon, без прав администратора).
           3. Вернуть всё как было — кнопка **«Вернуть Explorer»** в том же
              switcher.exe.
+
+          Настройка виджетов: скопируйте `widgets.example.json` в
+          `%USERPROFILE%\.swinewm\widgets.json` и правьте под себя.
 
           Требования: Windows 10/11 x64. Исходники в engine/, детали порта —
           в docs/port.md.

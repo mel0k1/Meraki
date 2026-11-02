@@ -22,12 +22,14 @@
 
 Qt Quick внутри процесса движка:
 
-- `qmlbar.cpp` — окно бара (frameless, поверх всех, прозрачный фон) и
-  объект `bridge` для QML: свойства `workspaces`, `activeName`, команда
-  `switchTo(n)`; `MerakiDock`: список окон из `IPC_GET_TREE` (id, hwnd,
-  iconic), иконки, пины (`togglePin`, сохранение в `~/.swinewm/dock.json`),
-  контекстное меню пина — отдельное popup-окно `dock/DockMenu.qml`
-  (`showMenu`, закрытие приложения — `[con_id=N] kill`); `MerakiCenter`:
+- `qmlbar.cpp` — бары (окно на каждый экран, frameless, поверх всех,
+  прозрачный фон) и объект `bridge` для QML: свойства `workspaces`,
+  `activeName`, команда `switchTo(n)`; `MerakiDock` — по экземпляру на
+  экран: список окон из `IPC_GET_TREE` (id, hwnd, iconic), иконки, пины
+  (`togglePin`, сохранение в `~/.swinewm/dock.json` с синхронизацией копий
+  по mtime), контекстное меню пина — отдельное popup-окно
+  `dock/DockMenu.qml` (`showMenu`, закрытие приложения — `[con_id=N] kill`);
+  `MerakiCenter`:
   панель уведомлений `center/Center.qml` — активные + история из
   `SWINE_IPC_GET_NOTIFICATIONS`/`_HISTORY`, закрытие —
   `SWINE_IPC_CLOSE_NOTIFICATION`, тумблер — клик по часам (`toggleCenter`),
@@ -46,10 +48,12 @@ Qt Quick внутри процесса движка:
   (`widgets/`: часы, календарь, погода, музыка), пилюли рабочих столов,
   часы.
 
-Виджеты — отдельное окно слоя рабочего стола: движок держит его прямо над
-обоями (`win32_desktop_layer_*` в `wallpaper.c`), регион ввода только под
-карточками; медиа-данные даёт `media.cpp` (Windows GSMTC через C++/WinRT),
-погода — open-meteo прямо из QML.
+Виджеты — окна слоя рабочего стола (по одному на экран, `screens` в
+`widgets.json`): движок держит их прямо над обоями (`win32_desktop_layer_*`
+в `wallpaper.c`), регион ввода только под карточками; раскладка, размеры и
+состав карточек — в `~/.swinewm/widgets.json` (пример `pack/widgets.example.json`);
+медиа-данные даёт `media.cpp` (Windows GSMTC через C++/WinRT), погода —
+open-meteo прямо из QML.
 
 Генси: клик по иконке сфокусированного окна -> стоп-кадр окна -> окно
 сворачивается -> вершинный шейдер `genie.vert` (сетка 6x64) льёт кадр в слот

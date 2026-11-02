@@ -28,7 +28,7 @@ Item {
         return -1
     }
 
-    width: bridge.screenWidth
+    width: viewW
     height: Math.ceil(margin + bgHeight + headroom)
 
     Component.onCompleted: {
@@ -37,8 +37,8 @@ Item {
     }
 
     function slotRect(index) {
-        return Qt.rect(refLeft + index * (iconSize + spacing),
-                       bridge.screenHeight - margin - bottomPad - iconSize,
+        return Qt.rect(refLeft + index * (iconSize + spacing) + viewX,
+                       height - margin - bottomPad - iconSize + viewY,
                        iconSize, iconSize)
     }
 
@@ -111,9 +111,9 @@ Item {
     Item {
         id: backdrop
         x: 0
-        y: -(bridge.screenHeight - root.height)
-        width: bridge.screenWidth
-        height: bridge.screenHeight
+        y: -(viewH - root.height)
+        width: viewW
+        height: viewH
 
         Image {
             anchors.fill: parent
@@ -125,8 +125,8 @@ Item {
             model: bridge.windows
             Rectangle {
                 required property var modelData
-                x: modelData.x
-                y: modelData.y
+                x: modelData.x - viewX
+                y: modelData.y - viewY
                 width: Math.max(2, modelData.w)
                 height: Math.max(2, modelData.h)
                 radius: 4

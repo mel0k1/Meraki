@@ -571,6 +571,7 @@ class MerakiDock : public QObject {
 public:
         explicit MerakiDock(QObject *parent = nullptr) : QObject(parent) {
                 loadPins();
+                m_pinStamp = pinStamp();
                 m_regionTimer = new QTimer(this);
                 m_regionTimer->setInterval(120);
                 connect(m_regionTimer, &QTimer::timeout, this, &MerakiDock::updateRegion);
@@ -585,12 +586,12 @@ public:
                 m_launchTimer->start();
         }
 
-        void show() {
-                if (QScreen *screen = QGuiApplication::primaryScreen()) {
-                        const QRect g = screen->geometry();
-                        m_screenWidth = g.width();
-                        m_screenHeight = g.height();
-                }
+        void show(QScreen *screen) {
+                const QRect g = screen->geometry();
+                m_screenX = g.x();
+                m_screenY = g.y();
+                m_screenWidth = g.width();
+                m_screenHeight = g.height();
                 wchar_t wp[MAX_PATH] = {};
                 SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wp, 0);
                 QString wall = QString::fromWCharArray(wp);
@@ -604,16 +605,15 @@ public:
                 m_view->setColor(Qt::transparent);
                 m_view->setResizeMode(QQuickView::SizeRootObjectToView);
                 m_view->rootContext()->setContextProperty("bridge", this);
+                m_view->rootContext()->setContextProperty("viewX", g.x());
+                m_view->rootContext()->setContextProperty("viewY", g.y());
                 if (g_fx) {
                         m_view->rootContext()->setContextProperty("fx", g_fx);
                 }
                 m_view->engine()->addImageProvider("dockicon", new DockIconProvider());
                 m_view->setSource(QUrl(QStringLiteral("qrc:/qml/Meraki/dock/Dock.qml")));
                 const int h = 132;
-                if (QScreen *screen = QGuiApplication::primaryScreen()) {
-                        const QRect g = screen->geometry();
-                        m_view->setGeometry(g.x(), g.y() + g.height() - h, g.width(), h);
-                }
+                m_view->setGeometry(g.x(), g.y() + g.height() - h, g.width(), h);
                 m_view->show();
                 refresh();
                 updateRegion();
@@ -728,8 +728,9 @@ public:
                 const int n = 1 + (running ? 1 : 0);
                 const int h = 42 + n * 40 + (n - 1) * 2 + 12;
                 int x = int(ax) - w / 2;
-                x = std::max(8, std::min(m_screenWidth - w - 8, x));
-                int y = std::max(8, int(ay) - h - 10);
+                x = std::max(m_screenX + 8, std::min(m_screenX + m_screenWidth
+                        - w - 8, x));
+                int y = std::max(m_screenY + 8, int(ay) - h - 10);
                 m_menuView->setGeometry(x, y, w, h);
                 m_menuView->raise();
                 m_menuView->show();
@@ -742,6 +743,11 @@ public slots:
                 }
         }
         void refresh() {
+                const QDateTime stamp = pinStamp();
+                if (stamp != m_pinStamp) {
+                        m_pinStamp = stamp;
+                        reloadPins();
+                }
                 char *error = nullptr;
                 char *payload = ipc_request(nullptr, IPC_GET_TREE, "", &error);
                 if (!payload) {
@@ -912,6 +918,18 @@ private:
                 if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                         f.write(QJsonDocument(arr).toJson());
                 }
+                m_pinStamp = pinStamp();
+        }
+
+        QDateTime pinStamp() const {
+                const QFileInfo info(meraki_home_dir() + "/.swinewm/dock.json");
+                return info.exists() ? info.lastModified() : QDateTime();
+        }
+
+        void reloadPins() {
+                m_pins.clear();
+                loadPins();
+                emit pinsChanged();
         }
 
         void loadPins() {
@@ -964,10 +982,13 @@ private:
         QTimer *m_regionTimer = nullptr;
         QTimer *m_pollTimer = nullptr;
         QTimer *m_launchTimer = nullptr;
+        QDateTime m_pinStamp;
         QVariantList m_windows;
         QVariantList m_pins;
         QVariantMap m_launching;
         QUrl m_wallpaper;
+        int m_screenX = 0;
+        int m_screenY = 0;
         int m_screenWidth = 0;
         int m_screenHeight = 0;
         int m_lastW = -1;
@@ -1507,11 +1528,6 @@ public:
         }
 
         void show() {
-                if (QScreen *screen = QGuiApplication::primaryScreen()) {
-                        const QRect g = screen->geometry();
-                        m_screenWidth = g.width();
-                        m_screenHeight = g.height();
-                }
                 loadConfig();
                 wchar_t wp[MAX_PATH] = {};
                 SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, wp, 0);
@@ -1519,26 +1535,49 @@ public:
                 if (!wall.isEmpty()) {
                         m_wallpaper = QUrl::fromLocalFile(wall);
                 }
-                m_media = new MerakiMedia(this);
-                m_media->start();
-                m_view = new QQuickView();
-                m_view->setFlags(Qt::FramelessWindowHint | Qt::Tool |
-                        Qt::NoDropShadowWindowHint);
-                m_view->setColor(Qt::transparent);
-                m_view->setResizeMode(QQuickView::SizeRootObjectToView);
-                m_view->rootContext()->setContextProperty("bridge", this);
-                m_view->rootContext()->setContextProperty("media", m_media);
-                m_view->setSource(QUrl(QStringLiteral(
-                        "qrc:/qml/Meraki/widgets/Widgets.qml")));
                 if (QScreen *screen = QGuiApplication::primaryScreen()) {
                         const QRect g = screen->geometry();
-                        m_view->setGeometry(g);
+                        m_screenWidth = g.width();
+                        m_screenHeight = g.height();
                 }
-                m_view->show();
-                const HWND hwnd = (HWND)m_view->winId();
-                win32_desktop_layer_register(hwnd);
-                win32_desktop_layer_place(hwnd);
-                m_hwnd = hwnd;
+                m_media = new MerakiMedia(this);
+                m_media->start();
+                QList<QScreen *> screens;
+                if (m_config.value("screens").toString() == "primary") {
+                        if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                                screens.append(screen);
+                        }
+                } else {
+                        screens = QGuiApplication::screens();
+                }
+                for (int i = 0; i < screens.size(); ++i) {
+                        Screen s;
+                        const QRect g = screens.at(i)->geometry();
+                        s.x = g.x();
+                        s.y = g.y();
+                        s.w = g.width();
+                        s.h = g.height();
+                        s.view = new QQuickView();
+                        s.view->setFlags(Qt::FramelessWindowHint | Qt::Tool |
+                                Qt::NoDropShadowWindowHint);
+                        s.view->setColor(Qt::transparent);
+                        s.view->setResizeMode(QQuickView::SizeRootObjectToView);
+                        s.view->rootContext()->setContextProperty("bridge", this);
+                        s.view->rootContext()->setContextProperty("media", m_media);
+                        s.view->rootContext()->setContextProperty("viewX", s.x);
+                        s.view->rootContext()->setContextProperty("viewY", s.y);
+                        s.view->rootContext()->setContextProperty("viewW", s.w);
+                        s.view->rootContext()->setContextProperty("viewH", s.h);
+                        s.view->rootContext()->setContextProperty("viewIndex", i);
+                        s.view->setSource(QUrl(QStringLiteral(
+                                "qrc:/qml/Meraki/widgets/Widgets.qml")));
+                        s.view->setGeometry(g);
+                        s.view->show();
+                        s.hwnd = (HWND)s.view->winId();
+                        win32_desktop_layer_register(s.hwnd);
+                        win32_desktop_layer_place(s.hwnd);
+                        m_screens.append(s);
+                }
         }
 
         QVariantMap config() const {
@@ -1561,9 +1600,12 @@ public:
                 return g_dock ? g_dock->windows() : QVariantList();
         }
 
-        Q_INVOKABLE void setCards(const QVariantList &cards) {
-                if (cards != m_cards) {
-                        m_cards = cards;
+        Q_INVOKABLE void setCards(int index, const QVariantList &cards) {
+                if (index < 0 || index >= m_screens.size()) {
+                        return;
+                }
+                if (cards != m_screens[index].cards) {
+                        m_screens[index].cards = cards;
                 }
         }
 
@@ -1572,64 +1614,119 @@ signals:
 
 public slots:
         void updateRegion() {
-                if (!m_view) {
-                        return;
-                }
-                HRGN rgn = CreateRectRgn(0, 0, 0, 0);
-                for (const QVariant &v : m_cards) {
-                        const QVariantMap c = v.toMap();
-                        const int x = c.value("x").toInt();
-                        const int y = c.value("y").toInt();
-                        const int w = c.value("w").toInt();
-                        const int h = c.value("h").toInt();
-                        if (w <= 0 || h <= 0) {
+                for (const Screen &s : m_screens) {
+                        if (!s.view) {
                                 continue;
                         }
-                        HRGN r = CreateRoundRectRgn(x, y, x + w, y + h, 30, 30);
-                        CombineRgn(rgn, rgn, r, RGN_OR);
-                        DeleteObject(r);
+                        HRGN rgn = CreateRectRgn(0, 0, 0, 0);
+                        for (const QVariant &v : s.cards) {
+                                const QVariantMap c = v.toMap();
+                                const int x = c.value("x").toInt();
+                                const int y = c.value("y").toInt();
+                                const int w = c.value("w").toInt();
+                                const int h = c.value("h").toInt();
+                                if (w <= 0 || h <= 0) {
+                                        continue;
+                                }
+                                HRGN r = CreateRoundRectRgn(x, y, x + w, y + h,
+                                        30, 30);
+                                CombineRgn(rgn, rgn, r, RGN_OR);
+                                DeleteObject(r);
+                        }
+                        SetWindowRgn((HWND)s.view->winId(), rgn, FALSE);
                 }
-                SetWindowRgn((HWND)m_view->winId(), rgn, FALSE);
         }
 
         void reposition() {
-                if (m_hwnd) {
-                        win32_desktop_layer_place(m_hwnd);
+                for (const Screen &s : m_screens) {
+                        if (s.hwnd) {
+                                win32_desktop_layer_place(s.hwnd);
+                        }
                 }
         }
 
 private:
+        struct Screen {
+                QQuickView *view = nullptr;
+                HWND hwnd = nullptr;
+                QVariantList cards;
+                int x = 0, y = 0, w = 0, h = 0;
+        };
+
+        static void pick(QVariantMap &dst, const QVariantMap &src,
+                const char *from, const char *to) {
+                if (src.contains(from)) {
+                        dst.insert(to, src.value(from));
+                }
+        }
+
         void loadConfig() {
-                m_config.insert("latitude", 55.7558);
-                m_config.insert("longitude", 37.6173);
-                m_config.insert("city", QString::fromUtf8("Москва"));
+                QVariantMap c;
+                c.insert("screens", "all");
+                c.insert("side", "right");
+                c.insert("margin", 22);
+                c.insert("top", 76);
+                c.insert("spacing", 16);
+                c.insert("clockEnabled", true);
+                c.insert("clockSize", 168);
+                c.insert("clockSeconds", true);
+                c.insert("calendarEnabled", true);
+                c.insert("calendarSize", 224);
+                c.insert("weatherEnabled", true);
+                c.insert("weatherWidth", 320);
+                c.insert("weatherHeight", 158);
+                c.insert("weatherUnits", "celsius");
+                c.insert("latitude", 55.7558);
+                c.insert("longitude", 37.6173);
+                c.insert("city", QString::fromUtf8("Москва"));
+                c.insert("mediaEnabled", true);
+                c.insert("mediaWidth", 320);
+                c.insert("mediaHeight", 104);
                 QFile f(meraki_home_dir() + "/.swinewm/widgets.json");
                 if (f.open(QIODevice::ReadOnly)) {
                         const QJsonObject o = QJsonDocument::fromJson(
                                 f.readAll()).object();
-                        if (o.contains("latitude")) {
-                                m_config.insert("latitude",
-                                        o.value("latitude").toDouble());
+                        const QVariantMap root = o.toVariantMap();
+                        const QVariantMap clock =
+                                o.value("clock").toObject().toVariantMap();
+                        const QVariantMap calendar =
+                                o.value("calendar").toObject().toVariantMap();
+                        const QVariantMap weather =
+                                o.value("weather").toObject().toVariantMap();
+                        const QVariantMap media =
+                                o.value("media").toObject().toVariantMap();
+                        for (const char *k : {"screens", "side", "margin",
+                                "top", "spacing", "latitude", "longitude",
+                                "city"}) {
+                                if (root.contains(k)) {
+                                        c.insert(k, root.value(k));
+                                }
                         }
-                        if (o.contains("longitude")) {
-                                m_config.insert("longitude",
-                                        o.value("longitude").toDouble());
-                        }
-                        if (o.contains("city")) {
-                                m_config.insert("city",
-                                        o.value("city").toString());
-                        }
+                        pick(c, clock, "enabled", "clockEnabled");
+                        pick(c, clock, "size", "clockSize");
+                        pick(c, clock, "seconds", "clockSeconds");
+                        pick(c, calendar, "enabled", "calendarEnabled");
+                        pick(c, calendar, "size", "calendarSize");
+                        pick(c, weather, "enabled", "weatherEnabled");
+                        pick(c, weather, "width", "weatherWidth");
+                        pick(c, weather, "height", "weatherHeight");
+                        pick(c, weather, "units", "weatherUnits");
+                        pick(c, weather, "latitude", "latitude");
+                        pick(c, weather, "longitude", "longitude");
+                        pick(c, weather, "city", "city");
+                        pick(c, media, "enabled", "mediaEnabled");
+                        pick(c, media, "width", "mediaWidth");
+                        pick(c, media, "height", "mediaHeight");
                 }
+                m_config = c;
         }
 
-        QQuickView *m_view = nullptr;
+        QList<Screen> m_screens;
         QTimer *m_regionTimer = nullptr;
         QTimer *m_placeTimer = nullptr;
         MerakiMedia *m_media = nullptr;
         QVariantMap m_config;
-        QVariantList m_cards;
         QUrl m_wallpaper;
-        HWND m_hwnd = nullptr;
         int m_screenWidth = 0;
         int m_screenHeight = 0;
 };
@@ -1659,21 +1756,29 @@ public:
                 QSurfaceFormat::setDefaultFormat(format);
                 QQuickView::setDefaultAlphaBuffer(true);
 
-                m_view = new QQuickView();
-                m_view->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
-                        Qt::Tool | Qt::NoDropShadowWindowHint);
-                m_view->setColor(Qt::transparent);
-                m_view->setResizeMode(QQuickView::SizeRootObjectToView);
-                m_view->rootContext()->setContextProperty("bridge", this);
-                m_view->engine()->addImageProvider("trayicon",
-                        new TrayIconProvider());
-                m_view->setSource(QUrl(QStringLiteral("qrc:/qml/Meraki/Main.qml")));
-                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                QScreen *primary = QGuiApplication::primaryScreen();
+                const QList<QScreen *> screens = QGuiApplication::screens();
+                for (QScreen *screen : screens) {
+                        QQuickView *view = new QQuickView();
+                        view->setFlags(Qt::FramelessWindowHint |
+                                Qt::WindowStaysOnTopHint | Qt::Tool |
+                                Qt::NoDropShadowWindowHint);
+                        view->setColor(Qt::transparent);
+                        view->setResizeMode(QQuickView::SizeRootObjectToView);
+                        view->rootContext()->setContextProperty("bridge", this);
+                        view->rootContext()->setContextProperty("viewPrimary",
+                                screen == primary);
+                        view->engine()->addImageProvider("trayicon",
+                                new TrayIconProvider());
+                        view->setSource(QUrl(QStringLiteral(
+                                "qrc:/qml/Meraki/Main.qml")));
                         const QRect geometry = screen->geometry();
-                        m_view->setGeometry(geometry.x(), geometry.y(), geometry.width(), 36);
+                        view->setGeometry(geometry.x(), geometry.y(),
+                                geometry.width(), 36);
+                        view->show();
+                        m_views.append(view);
                 }
                 refresh();
-                m_view->show();
                 syncTray();
         }
 
@@ -1828,7 +1933,7 @@ private:
                 meraki_ipc_command(command.c_str());
         }
 
-        QQuickView *m_view = nullptr;
+        QList<QQuickView *> m_views;
         QTimer *m_timer = nullptr;
         QVariantList m_workspaces;
         QString m_activeName;
@@ -1863,9 +1968,16 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         MerakiBar bar;
         g_bar = &bar;
         bar.show();
-        MerakiDock dock;
-        g_dock = &dock;
-        dock.show();
+        MerakiDock *primaryDock = nullptr;
+        const QList<QScreen *> screens = QGuiApplication::screens();
+        for (QScreen *screen : screens) {
+                MerakiDock *dock = new MerakiDock(&app);
+                if (!primaryDock) {
+                        primaryDock = dock;
+                        g_dock = dock;
+                }
+                dock->show(screen);
+        }
         MerakiCenter center;
         g_center = &center;
         center.init();

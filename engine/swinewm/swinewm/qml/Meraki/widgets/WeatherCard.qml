@@ -13,6 +13,11 @@ Item {
     property string kind: "cloud"
     property bool isDay: true
     property var hourly: []
+    property bool fahrenheit: false
+
+    function disp(c) {
+        return w.fahrenheit ? Math.round(c * 9 / 5 + 32) : c
+    }
 
     function codeInfo(c) {
         if (c === 0) return { k: "sun", t: "Ясно" }
@@ -136,7 +141,7 @@ Item {
     Text {
         x: 15
         y: 30
-        text: w.ready ? (w.temp + "°") : "–°"
+        text: w.ready ? (w.disp(w.temp) + "°") : "–°"
         color: Qt.rgba(1, 1, 1, 0.96)
         font.family: "SF Pro Display"
         font.pixelSize: 46
@@ -167,7 +172,7 @@ Item {
 
         Text {
             visible: w.ready
-            text: "В:" + w.hi + "°  Н:" + w.lo + "°"
+            text: "В:" + w.disp(w.hi) + "°  Н:" + w.disp(w.lo) + "°"
             color: Qt.rgba(1, 1, 1, 0.72)
             font.family: "SF Pro Display"
             font.pixelSize: 13
@@ -214,7 +219,7 @@ Item {
                 Text {
                     width: parent.width
                     horizontalAlignment: Text.AlignHCenter
-                    text: hourCol.modelData.t + "°"
+                    text: w.disp(hourCol.modelData.t) + "°"
                     color: Qt.rgba(1, 1, 1, 0.9)
                     font.family: "SF Pro Display"
                     font.pixelSize: 12

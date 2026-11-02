@@ -1,0 +1,30 @@
+{
+    "screens": "all",
+    "side": "right",
+    "margin": 22,
+    "top": 76,
+    "spacing": 16,
+    "clock": {
+        "enabled": true,
+        "size": 168,
+        "seconds": true
+    },
+    "calendar": {
+        "enabled": true,
+        "size": 224
+    },
+    "weather": {
+        "enabled": true,
+        "width": 320,
+        "height": 158,
+        "units": "celsius",
+        "latitude": 55.7558,
+        "longitude": 37.6173,
+        "city": "Москва"
+    },
+    "media": {
+        "enabled": true,
+        "width": 320,
+        "height": 104
+    }
+}

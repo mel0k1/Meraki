@@ -77,11 +77,13 @@ Rectangle {
         }
     }
 
-    Tray {
+    Loader {
         anchors {
             right: clock.left
             rightMargin: 16
             verticalCenter: parent.verticalCenter
         }
+        active: bridge.viewPrimary === true
+        sourceComponent: Tray {}
     }
 }

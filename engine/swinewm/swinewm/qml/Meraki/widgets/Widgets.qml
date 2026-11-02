@@ -3,17 +3,21 @@ import QtQuick
 Item {
     id: root
 
-    readonly property bool showCalendar: bridge.screenHeight >= 940
-    readonly property bool showWeather: bridge.screenHeight >= 780
-    readonly property bool showMedia: bridge.screenHeight >= 620
+    readonly property var cfg: bridge.config
+    readonly property bool leftSide: cfg.side === "left"
+    readonly property int contentW: Math.max(
+        cfg.clockEnabled ? cfg.clockSize : 0,
+        cfg.calendarEnabled ? cfg.calendarSize : 0,
+        cfg.weatherEnabled ? cfg.weatherWidth : 0,
+        cfg.mediaEnabled ? cfg.mediaWidth : 0)
 
-    width: bridge.screenWidth
-    height: bridge.screenHeight
+    width: viewW
+    height: viewH
 
     Item {
         id: backdrop
-        width: bridge.screenWidth
-        height: bridge.screenHeight
+        width: viewW
+        height: viewH
 
         Image {
             anchors.fill: parent
@@ -25,8 +29,8 @@ Item {
             model: bridge.windows
             Rectangle {
                 required property var modelData
-                x: modelData.x
-                y: modelData.y
+                x: modelData.x - viewX
+                y: modelData.y - viewY
                 width: Math.max(2, modelData.w)
                 height: Math.max(2, modelData.h)
                 radius: 4
@@ -49,13 +53,10 @@ Item {
                 })
             }
         }
-        bridge.setCards(list)
+        bridge.setCards(viewIndex, list)
     }
 
     Component.onCompleted: reportCards()
-    onShowCalendarChanged: reportCards()
-    onShowWeatherChanged: reportCards()
-    onShowMediaChanged: reportCards()
 
     Connections {
         target: media
@@ -65,36 +66,42 @@ Item {
     Column {
         id: col
 
-        x: bridge.screenWidth - 342
-        y: 76
-        spacing: 16
+        x: root.leftSide ? root.cfg.margin
+                         : viewW - root.contentW - root.cfg.margin
+        y: root.cfg.top
+        spacing: root.cfg.spacing
 
         ClockCard {
-            x: 152
-            width: 168
-            height: 168
+            visible: root.cfg.clockEnabled
+            x: root.contentW - root.cfg.clockSize
+            width: root.cfg.clockSize
+            height: root.cfg.clockSize
+            showSeconds: root.cfg.clockSeconds
             backdrop: backdrop
         }
 
         CalendarCard {
-            visible: root.showCalendar
-            x: 96
-            width: 224
-            height: 224
+            visible: root.cfg.calendarEnabled
+            x: root.contentW - root.cfg.calendarSize
+            width: root.cfg.calendarSize
+            height: root.cfg.calendarSize
             backdrop: backdrop
         }
 
         WeatherCard {
-            visible: root.showWeather
-            width: 320
-            height: 158
+            visible: root.cfg.weatherEnabled
+            fahrenheit: root.cfg.weatherUnits === "fahrenheit"
+            x: root.contentW - root.cfg.weatherWidth
+            width: root.cfg.weatherWidth
+            height: root.cfg.weatherHeight
             backdrop: backdrop
         }
 
         MediaCard {
-            visible: root.showMedia && media.hasSession
-            width: 320
-            height: 104
+            visible: root.cfg.mediaEnabled && media.hasSession
+            x: root.contentW - root.cfg.mediaWidth
+            width: root.cfg.mediaWidth
+            height: root.cfg.mediaHeight
             backdrop: backdrop
         }
     }

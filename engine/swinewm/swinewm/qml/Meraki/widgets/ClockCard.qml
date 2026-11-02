@@ -6,6 +6,7 @@ Item {
 
     property Item backdrop
     property var now: new Date()
+    property bool showSeconds: true
 
     Timer {
         interval: 33
@@ -69,19 +70,23 @@ Item {
                        cy - Math.cos(m / 60 * 2 * Math.PI) * r * 0.76)
             ctx.stroke()
 
-            ctx.strokeStyle = "#FF9F0A"
-            ctx.lineWidth = 1.6
-            ctx.beginPath()
-            ctx.moveTo(cx - Math.sin(s / 60 * 2 * Math.PI) * r * 0.22,
-                       cy + Math.cos(s / 60 * 2 * Math.PI) * r * 0.22)
-            ctx.lineTo(cx + Math.sin(s / 60 * 2 * Math.PI) * r * 0.80,
-                       cy - Math.cos(s / 60 * 2 * Math.PI) * r * 0.80)
-            ctx.stroke()
+            if (w.showSeconds) {
+                ctx.strokeStyle = "#FF9F0A"
+                ctx.lineWidth = 1.6
+                ctx.beginPath()
+                ctx.moveTo(cx - Math.sin(s / 60 * 2 * Math.PI) * r * 0.22,
+                           cy + Math.cos(s / 60 * 2 * Math.PI) * r * 0.22)
+                ctx.lineTo(cx + Math.sin(s / 60 * 2 * Math.PI) * r * 0.80,
+                           cy - Math.cos(s / 60 * 2 * Math.PI) * r * 0.80)
+                ctx.stroke()
+            }
 
-            ctx.fillStyle = "#FF9F0A"
-            ctx.beginPath()
-            ctx.arc(cx, cy, 2.6, 0, 2 * Math.PI)
-            ctx.fill()
+            if (w.showSeconds) {
+                ctx.fillStyle = "#FF9F0A"
+                ctx.beginPath()
+                ctx.arc(cx, cy, 2.6, 0, 2 * Math.PI)
+                ctx.fill()
+            }
         }
     }
 }
