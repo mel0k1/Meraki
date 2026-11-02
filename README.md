@@ -9,7 +9,7 @@ IPC-протокол i3/sway, встроенные уведомления в д�
 ## Состав
 
 - `engine/` — движок: копия SwineWM (MIT) и QML-слой Meraki, собираемый
-  внутрь `swinewm.exe` (опция `MERAKI_QML`)
+  внутрь `meraki.exe` (опция `MERAKI_QML`, цель `swinewm`)
 - `docs/architecture.md` — как это устроено
 - `docs/port.md` — что откуда портировано, roadmap
 
@@ -27,15 +27,15 @@ Linux:
 
 ## Запуск
 
-    build\swinewm\Release\swinewm.exe
+    build\swinewm\Release\meraki.exe
 
 Заменить explorer.exe при входе в систему (обратимо):
 
-    swinewm.exe --set-shell
-    swinewm.exe --unset-shell
+    meraki.exe --set-shell
+    meraki.exe --unset-shell
 
-Рядом с Explorer: `swinewm.exe --set-autostart` (экспериментально). После
-сбоя оболочки: `swinewm.exe --recover` вернёт спрятанные окна.
+Рядом с Explorer: `meraki.exe --set-autostart` (экспериментально). После
+сбоя оболочки: `meraki.exe --recover` вернёт спрятанные окна.
 
 Конфиг: `%USERPROFILE%\.swinewm\config` — синтаксис sway. Нативный бар
 движка скрыт (`bar mode invisible`): верхнюю панель и док рисует QML-слой

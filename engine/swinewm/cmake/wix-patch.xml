@@ -1,8 +1,9 @@
 <!-- Extra WiX elements for CPack's MSI. The Id names the component CPack
-     generates for swinewm.exe; the Environment entry is added to it, so the
-     PATH change is installed and removed together with the program. -->
+     generates for meraki.exe (the swinewm target's OUTPUT_NAME); the
+     Environment entry is added to it, so the PATH change is installed and
+     removed together with the program. -->
 <CPackWiXPatch>
-  <CPackWiXFragment Id="CM_CP_swinewm.exe">
+  <CPackWiXFragment Id="CM_CP_meraki.exe">
     <Environment Id="SwineWMPath" Name="PATH" Value="[INSTALL_ROOT]"
       Permanent="no" Part="last" Action="set" System="yes" />
   </CPackWiXFragment>

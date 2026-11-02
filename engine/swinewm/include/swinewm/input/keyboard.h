@@ -7,14 +7,14 @@
 
 // Modifier bits use the same values as wlroots' enum wlr_keyboard_modifier.
 enum swine_modifier {
-	SWINE_MOD_SHIFT = 1 << 0,
-	SWINE_MOD_CAPS = 1 << 1,
-	SWINE_MOD_CTRL = 1 << 2,
-	SWINE_MOD_ALT = 1 << 3,   // Mod1
-	SWINE_MOD_MOD2 = 1 << 4,
-	SWINE_MOD_MOD3 = 1 << 5,
-	SWINE_MOD_LOGO = 1 << 6,  // Mod4, the Windows key
-	SWINE_MOD_MOD5 = 1 << 7,
+        SWINE_MOD_SHIFT = 1 << 0,
+        SWINE_MOD_CAPS = 1 << 1,
+        SWINE_MOD_CTRL = 1 << 2,
+        SWINE_MOD_ALT = 1 << 3,   // Mod1
+        SWINE_MOD_MOD2 = 1 << 4,
+        SWINE_MOD_MOD3 = 1 << 5,
+        SWINE_MOD_LOGO = 1 << 6,  // Mod4, the Windows key
+        SWINE_MOD_MOD5 = 1 << 7,
 };
 
 // Key codes are Windows virtual-key codes. They are plain integers, so the
@@ -40,6 +40,16 @@ void keyboard_layouts_finish(void);
 struct swine_binding;
 // Looks up a binding in the current mode. Returns NULL if none matches.
 struct swine_binding *keyboard_find_binding(uint32_t modifiers,
-		uint32_t keycode, bool release);
+                uint32_t keycode, bool release);
+
+// The low-level keyboard hook runs on its own thread and reads bindings
+// while the main thread may replace them (reload). Readers take the shared
+// side; bind/mode/reload on the main thread take the exclusive side. The
+// write lock is a no-op while a config is being read (the load path already
+// holds it).
+void keyboard_bindings_lock_shared(void);
+void keyboard_bindings_unlock_shared(void);
+void keyboard_bindings_write_lock(void);
+void keyboard_bindings_write_unlock(void);
 
 #endif

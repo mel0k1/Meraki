@@ -2,7 +2,8 @@
 #
 # Everything goes into one directory (C:\Program Files\SwineWM by default):
 #
-#   swinewm.exe, swinemsg.exe, swinemenu.exe, notify-send.exe, makoctl.exe
+#   meraki.exe (target swinewm), swinemsg.exe, swinemenu.exe,
+#   notify-send.exe, makoctl.exe
 #   config                    default sway config
 #   waybar\config.jsonc       default bar config
 #   waybar\style.css          default bar style
@@ -21,20 +22,20 @@ install(FILES resources/wallpapers/swinewm-default.png DESTINATION wallpapers)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE DESTINATION .
   RENAME LICENSE.txt)
 
-set(CPACK_PACKAGE_NAME "SwineWM")
-set(CPACK_PACKAGE_VENDOR "SwineWM")
+set(CPACK_PACKAGE_NAME "Meraki")
+set(CPACK_PACKAGE_VENDOR "Meraki")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-  "Sway-like tiling window manager, bar and notifications for Windows")
+  "Desktop environment for Windows in the Mac style, on the SwineWM engine")
 # X.Y.Z.N: the MSI compares X.Y.Z, and a build with the same X.Y.Z
 # replaces an installed one (CPack allows same-version upgrades).
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 # File names carry the readable version: SwineWM-0.1.0-win64.msi on a
 # release, SwineWM-0.1.0-5-g1234abc-win64.msi in between.
-set(CPACK_PACKAGE_FILE_NAME "SwineWM-${SWINEWM_VERSION}-win64")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "SwineWM")
+set(CPACK_PACKAGE_FILE_NAME "Meraki-${SWINEWM_VERSION}-win64")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "Meraki")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/staalmannen/SwineWM")
-# Start menu shortcut: SwineWM -> swinewm.exe
-set(CPACK_PACKAGE_EXECUTABLES "swinewm" "SwineWM")
+# Start menu shortcut: Meraki -> meraki.exe (target swinewm)
+set(CPACK_PACKAGE_EXECUTABLES "swinewm" "Meraki")
 # The WiX generator wants the licence as .txt or .rtf.
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE
   ${CMAKE_CURRENT_BINARY_DIR}/LICENSE.txt COPYONLY)

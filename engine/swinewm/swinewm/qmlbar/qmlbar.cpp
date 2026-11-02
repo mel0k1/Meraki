@@ -15,6 +15,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <QFileSystemWatcher>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
@@ -587,6 +588,7 @@ public:
         }
 
         void show(QScreen *screen) {
+                m_screen = screen;
                 const QRect g = screen->geometry();
                 m_screenX = g.x();
                 m_screenY = g.y();
@@ -629,6 +631,25 @@ public:
 
         QVariantMap launching() const {
                 return m_launching;
+        }
+
+        bool owns(QScreen *screen) const {
+                return m_screen == screen;
+        }
+
+        // Monitor hotplug: close the dock's windows with its screen.
+        void shutdown() {
+                if (m_view) {
+                        m_view->hide();
+                        m_view->deleteLater();
+                        m_view = nullptr;
+                }
+                if (m_menuView) {
+                        m_menuView->hide();
+                        m_menuView->deleteLater();
+                        m_menuView = nullptr;
+                }
+                m_menu = nullptr;
         }
 
         int screenWidth() const {
@@ -849,9 +870,10 @@ public slots:
                 if (!m_view) {
                         return;
                 }
-                const int step = 64;
-                int w = int(m_dockWidth) + 8;
-                w = ((w + step - 1) / step) * step;
+                int w = int(m_dockWidth) + 12;
+                if (w < 96) {
+                        w = 96;
+                }
                 if (!m_dockHovered) {
                         m_restW = w;
                 } else {
@@ -979,6 +1001,7 @@ private:
         QQuickView *m_view = nullptr;
         QQuickView *m_menuView = nullptr;
         MerakiMenu *m_menu = nullptr;
+        QScreen *m_screen = nullptr;
         QTimer *m_regionTimer = nullptr;
         QTimer *m_pollTimer = nullptr;
         QTimer *m_launchTimer = nullptr;
@@ -1000,6 +1023,44 @@ private:
 };
 
 static MerakiDock *g_dock = nullptr;
+static QList<MerakiDock *> g_docks;
+// The QGuiApplication lives on the QML thread; docks are parented to it.
+static QGuiApplication *g_app = nullptr;
+
+// Monitor hotplug: one dock per screen, created and dropped as monitors
+// come and go.
+static void dock_add_screen(QScreen *screen) {
+        if (!screen) {
+                return;
+        }
+        for (MerakiDock *dock : g_docks) {
+                if (dock->owns(screen)) {
+                        return;
+                }
+        }
+        MerakiDock *dock = new MerakiDock(g_app);
+        g_docks.append(dock);
+        if (!g_dock) {
+                g_dock = dock;
+        }
+        dock->show(screen);
+}
+
+static void dock_remove_screen(QScreen *screen) {
+        for (int i = 0; i < g_docks.size(); ++i) {
+                MerakiDock *dock = g_docks.at(i);
+                if (!dock->owns(screen)) {
+                        continue;
+                }
+                g_docks.removeAt(i);
+                dock->shutdown();
+                dock->deleteLater();
+                if (g_dock == dock) {
+                        g_dock = g_docks.isEmpty() ? nullptr : g_docks.first();
+                }
+                return;
+        }
+}
 
 class MerakiCenter : public QObject {
         Q_OBJECT
@@ -1050,6 +1111,13 @@ public:
                         const QRect g = screen->geometry();
                         m_view->setGeometry(g.x() + g.width() - w - 12, g.y(), w, h);
                 }
+                // Clicking anywhere outside the panel closes it, like the
+                // Launchpad and the dock menu.
+                QObject::connect(m_view, &QQuickWindow::activeChanged, this, [this]() {
+                        if (m_view && m_open && !m_view->isActive()) {
+                                setOpen(false);
+                        }
+                });
                 syncWindows();
                 refreshNotes();
         }
@@ -1101,6 +1169,21 @@ public:
                 setOpen(false);
         }
 
+        // Monitor hotplug: follow the primary screen.
+        void reposition() {
+                QScreen *screen = QGuiApplication::primaryScreen();
+                if (!screen || !m_view) {
+                        return;
+                }
+                const QRect g = screen->geometry();
+                m_screenWidth = g.width();
+                m_screenHeight = g.height();
+                const int w = 384;
+                const int h = std::min(620, std::max(320,
+                        m_screenHeight - 60));
+                m_view->setGeometry(g.x() + g.width() - w - 12, g.y(), w, h);
+        }
+
         Q_INVOKABLE void dismiss(qint64 id) {
                 const std::string text = std::to_string(id);
                 char *error = nullptr;
@@ -1117,16 +1200,14 @@ public:
 
         Q_INVOKABLE void clearAll() {
                 for (const QVariant &v : m_activeIds) {
-                        const qlonglong id = v.toLongLong();
-                        char *error = nullptr;
-                        char *reply = ipc_request(nullptr,
-                                SWINE_IPC_CLOSE_NOTIFICATION,
-                                std::to_string(id).c_str(), &error);
-                        if (reply) {
-                                free(reply);
-                        }
-                        if (error) {
-                                free(error);
+                        closeNote(v.toLongLong());
+                }
+                // "Очистить" empties the whole panel: active notes and history.
+                const QVariantList snapshot = m_notes;
+                for (const QVariant &v : snapshot) {
+                        const QVariantMap n = v.toMap();
+                        if (!m_activeIds.contains(n.value("id"))) {
+                                closeNote(n.value("id").toLongLong());
                         }
                 }
                 refreshNotes();
@@ -1170,6 +1251,19 @@ signals:
 private:
         static void runCommand(const std::string &cmd) {
                 meraki_ipc_command(cmd.c_str());
+        }
+
+        static void closeNote(qlonglong id) {
+                char *error = nullptr;
+                char *reply = ipc_request(nullptr,
+                        SWINE_IPC_CLOSE_NOTIFICATION,
+                        std::to_string(id).c_str(), &error);
+                if (reply) {
+                        free(reply);
+                }
+                if (error) {
+                        free(error);
+                }
         }
 
         void appendNotify(uint32_t type, QVariantList &out,
@@ -1507,7 +1601,7 @@ static MerakiApps *g_apps = nullptr;
 
 class MerakiWidgets : public QObject {
         Q_OBJECT
-        Q_PROPERTY(QVariantMap config READ config CONSTANT)
+        Q_PROPERTY(QVariantMap config READ config NOTIFY configChanged)
         Q_PROPERTY(int screenWidth READ screenWidth CONSTANT)
         Q_PROPERTY(int screenHeight READ screenHeight CONSTANT)
         Q_PROPERTY(QUrl wallpaper READ wallpaper CONSTANT)
@@ -1542,46 +1636,44 @@ public:
                 }
                 m_media = new MerakiMedia(this);
                 m_media->start();
-                QList<QScreen *> screens;
-                if (m_config.value("screens").toString() == "primary") {
-                        if (QScreen *screen = QGuiApplication::primaryScreen()) {
-                                screens.append(screen);
-                        }
-                } else {
-                        screens = QGuiApplication::screens();
+                const QList<QScreen *> screens = QGuiApplication::screens();
+                for (QScreen *screen : screens) {
+                        addScreen(screen);
                 }
-                for (int i = 0; i < screens.size(); ++i) {
-                        Screen s;
-                        const QRect g = screens.at(i)->geometry();
-                        s.x = g.x();
-                        s.y = g.y();
-                        s.w = g.width();
-                        s.h = g.height();
-                        s.view = new QQuickView();
-                        s.view->setFlags(Qt::FramelessWindowHint | Qt::Tool |
-                                Qt::NoDropShadowWindowHint);
-                        s.view->setColor(Qt::transparent);
-                        s.view->setResizeMode(QQuickView::SizeRootObjectToView);
-                        s.view->rootContext()->setContextProperty("bridge", this);
-                        s.view->rootContext()->setContextProperty("media", m_media);
-                        s.view->rootContext()->setContextProperty("viewX", s.x);
-                        s.view->rootContext()->setContextProperty("viewY", s.y);
-                        s.view->rootContext()->setContextProperty("viewW", s.w);
-                        s.view->rootContext()->setContextProperty("viewH", s.h);
-                        s.view->rootContext()->setContextProperty("viewIndex", i);
-                        s.view->setSource(QUrl(QStringLiteral(
-                                "qrc:/qml/Meraki/widgets/Widgets.qml")));
-                        s.view->setGeometry(g);
-                        s.view->show();
-                        s.hwnd = (HWND)s.view->winId();
-                        win32_desktop_layer_register(s.hwnd);
-                        win32_desktop_layer_place(s.hwnd);
-                        m_screens.append(s);
+                connect(qApp, &QGuiApplication::screenAdded,
+                        this, &MerakiWidgets::addScreen);
+                connect(qApp, &QGuiApplication::screenRemoved,
+                        this, &MerakiWidgets::removeScreen);
+                m_watcher = new QFileSystemWatcher(this);
+                const QString path = meraki_home_dir()
+                        + "/.swinewm/widgets.json";
+                if (QFileInfo::exists(path)) {
+                        m_watcher->addPath(path);
                 }
+                connect(m_watcher, &QFileSystemWatcher::fileChanged, this,
+                        [this, path]() {
+                                loadConfig();
+                                emit configChanged();
+                                if (!m_watcher->files().contains(path)
+                                        && QFileInfo::exists(path)) {
+                                        m_watcher->addPath(path);
+                                }
+                        });
         }
 
         QVariantMap config() const {
                 return m_config;
+        }
+
+        Q_INVOKABLE void setWidgetPos(const QString &key, qreal x, qreal y) {
+                QVariantMap positions = m_config.value("positions").toMap();
+                QVariantMap p;
+                p.insert("x", int(x));
+                p.insert("y", int(y));
+                positions.insert(key.toLower(), p);
+                m_config.insert("positions", positions);
+                savePositions(positions);
+                emit configChanged();
         }
 
         int screenWidth() const {
@@ -1600,6 +1692,66 @@ public:
                 return g_dock ? g_dock->windows() : QVariantList();
         }
 
+public slots:
+        // Monitor hotplug, matching the widgets.json "screens" setting.
+        void addScreen(QScreen *screen) {
+                if (!screen) {
+                        return;
+                }
+                const bool primaryOnly =
+                        m_config.value("screens").toString() == "primary";
+                if (primaryOnly && screen != QGuiApplication::primaryScreen()) {
+                        return;
+                }
+                const QRect g = screen->geometry();
+                for (const Screen &s : m_screens) {
+                        if (s.view && s.view->geometry() == g) {
+                                return;
+                        }
+                }
+                Screen s;
+                s.x = g.x();
+                s.y = g.y();
+                s.w = g.width();
+                s.h = g.height();
+                s.view = new QQuickView();
+                s.view->setFlags(Qt::FramelessWindowHint | Qt::Tool |
+                        Qt::NoDropShadowWindowHint);
+                s.view->setColor(Qt::transparent);
+                s.view->setResizeMode(QQuickView::SizeRootObjectToView);
+                s.view->rootContext()->setContextProperty("bridge", this);
+                s.view->rootContext()->setContextProperty("media", m_media);
+                s.view->rootContext()->setContextProperty("viewX", s.x);
+                s.view->rootContext()->setContextProperty("viewY", s.y);
+                s.view->rootContext()->setContextProperty("viewW", s.w);
+                s.view->rootContext()->setContextProperty("viewH", s.h);
+                s.view->rootContext()->setContextProperty("viewIndex",
+                        m_screens.size());
+                s.view->setSource(QUrl(QStringLiteral(
+                        "qrc:/qml/Meraki/widgets/Widgets.qml")));
+                s.view->setGeometry(g);
+                s.view->show();
+                s.hwnd = (HWND)s.view->winId();
+                win32_desktop_layer_register(s.hwnd);
+                win32_desktop_layer_place(s.hwnd);
+                m_screens.append(s);
+        }
+
+        void removeScreen(QScreen *screen) {
+                const QRect g = screen->geometry();
+                for (int i = 0; i < m_screens.size(); ++i) {
+                        Screen &s = m_screens[i];
+                        if (!s.view || s.view->geometry() != g) {
+                                continue;
+                        }
+                        s.view->hide();
+                        s.view->deleteLater();
+                        s.view = nullptr;
+                        m_screens.removeAt(i);
+                        return;
+                }
+        }
+
         Q_INVOKABLE void setCards(int index, const QVariantList &cards) {
                 if (index < 0 || index >= m_screens.size()) {
                         return;
@@ -1611,6 +1763,7 @@ public:
 
 signals:
         void windowsChanged();
+        void configChanged();
 
 public slots:
         void updateRegion() {
@@ -1660,6 +1813,36 @@ private:
                 }
         }
 
+        static QString widgets_path() {
+                return meraki_home_dir() + "/.swinewm/widgets.json";
+        }
+
+        // Merge "positions" back into widgets.json, keeping every other
+        // field of the file as the user wrote it.
+        void savePositions(const QVariantMap &positions) {
+                const QString path = widgets_path();
+                QJsonObject o;
+                QFile f(path);
+                if (f.open(QIODevice::ReadOnly)) {
+                        o = QJsonDocument::fromJson(f.readAll()).object();
+                        f.close();
+                }
+                QJsonObject out;
+                for (auto it = positions.begin(); it != positions.end(); ++it) {
+                        const QVariantMap p = it.value().toMap();
+                        QJsonObject point;
+                        point.insert("x", p.value("x").toInt());
+                        point.insert("y", p.value("y").toInt());
+                        out.insert(it.key(), point);
+                }
+                o.insert("positions", out);
+                QFileInfo info(path);
+                QDir().mkpath(info.absolutePath());
+                if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                        f.write(QJsonDocument(o).toJson());
+                }
+        }
+
         void loadConfig() {
                 QVariantMap c;
                 c.insert("screens", "all");
@@ -1682,7 +1865,7 @@ private:
                 c.insert("mediaEnabled", true);
                 c.insert("mediaWidth", 320);
                 c.insert("mediaHeight", 104);
-                QFile f(meraki_home_dir() + "/.swinewm/widgets.json");
+                QFile f(widgets_path());
                 if (f.open(QIODevice::ReadOnly)) {
                         const QJsonObject o = QJsonDocument::fromJson(
                                 f.readAll()).object();
@@ -1697,7 +1880,7 @@ private:
                                 o.value("media").toObject().toVariantMap();
                         for (const char *k : {"screens", "side", "margin",
                                 "top", "spacing", "latitude", "longitude",
-                                "city"}) {
+                                "city", "positions"}) {
                                 if (root.contains(k)) {
                                         c.insert(k, root.value(k));
                                 }
@@ -1724,6 +1907,7 @@ private:
         QList<Screen> m_screens;
         QTimer *m_regionTimer = nullptr;
         QTimer *m_placeTimer = nullptr;
+        QFileSystemWatcher *m_watcher = nullptr;
         MerakiMedia *m_media = nullptr;
         QVariantMap m_config;
         QUrl m_wallpaper;
@@ -1756,30 +1940,54 @@ public:
                 QSurfaceFormat::setDefaultFormat(format);
                 QQuickView::setDefaultAlphaBuffer(true);
 
-                QScreen *primary = QGuiApplication::primaryScreen();
                 const QList<QScreen *> screens = QGuiApplication::screens();
                 for (QScreen *screen : screens) {
-                        QQuickView *view = new QQuickView();
-                        view->setFlags(Qt::FramelessWindowHint |
-                                Qt::WindowStaysOnTopHint | Qt::Tool |
-                                Qt::NoDropShadowWindowHint);
-                        view->setColor(Qt::transparent);
-                        view->setResizeMode(QQuickView::SizeRootObjectToView);
-                        view->rootContext()->setContextProperty("bridge", this);
-                        view->rootContext()->setContextProperty("viewPrimary",
-                                screen == primary);
-                        view->engine()->addImageProvider("trayicon",
-                                new TrayIconProvider());
-                        view->setSource(QUrl(QStringLiteral(
-                                "qrc:/qml/Meraki/Main.qml")));
-                        const QRect geometry = screen->geometry();
-                        view->setGeometry(geometry.x(), geometry.y(),
-                                geometry.width(), 36);
-                        view->show();
-                        m_views.append(view);
+                        addScreen(screen);
                 }
                 refresh();
                 syncTray();
+                connect(qApp, &QGuiApplication::screenAdded,
+                        this, &MerakiBar::addScreen);
+                connect(qApp, &QGuiApplication::screenRemoved,
+                        this, &MerakiBar::removeScreen);
+        }
+
+public slots:
+        // Monitor hotplug: a bar on every screen, the tray on the primary.
+        void addScreen(QScreen *screen) {
+                if (!screen || m_screens.contains(screen)) {
+                        return;
+                }
+                QQuickView *view = new QQuickView();
+                view->setFlags(Qt::FramelessWindowHint |
+                        Qt::WindowStaysOnTopHint | Qt::Tool |
+                        Qt::NoDropShadowWindowHint);
+                view->setColor(Qt::transparent);
+                view->setResizeMode(QQuickView::SizeRootObjectToView);
+                view->rootContext()->setContextProperty("bridge", this);
+                view->rootContext()->setContextProperty("viewPrimary",
+                        screen == QGuiApplication::primaryScreen());
+                view->engine()->addImageProvider("trayicon",
+                        new TrayIconProvider());
+                view->setSource(QUrl(QStringLiteral(
+                        "qrc:/qml/Meraki/Main.qml")));
+                const QRect geometry = screen->geometry();
+                view->setGeometry(geometry.x(), geometry.y(),
+                        geometry.width(), 36);
+                view->show();
+                m_screens.append(screen);
+                m_views.append(view);
+        }
+
+        void removeScreen(QScreen *screen) {
+                const int index = m_screens.indexOf(screen);
+                if (index < 0) {
+                        return;
+                }
+                m_screens.removeAt(index);
+                QQuickView *view = m_views.takeAt(index);
+                view->hide();
+                view->deleteLater();
         }
 
         QVariantList workspaces() const {
@@ -1871,6 +2079,26 @@ public slots:
                         if (type == (uint32_t)SWINE_IPC_EVENT_NOTIFICATION
                                 && g_center) {
                                 g_center->refreshNotes();
+                        } else if (type == (uint32_t)IPC_EVENT_BINDING
+                                && payload) {
+                                // DE binds: "nop meraki:<what>" in the config
+                                // toggles shell UI without any engine action.
+                                const QJsonObject event =
+                                        QJsonDocument::fromJson(
+                                                QByteArray(payload)).object();
+                                const QString command = event.value("binding")
+                                        .toObject().value("command").toString();
+                                if (command.startsWith(
+                                        QStringLiteral("nop meraki:"))) {
+                                        const QString what = command.mid(11)
+                                                .trimmed();
+                                        if (what == "launchpad" && g_apps) {
+                                                g_apps->toggle();
+                                        } else if (what == "center"
+                                                && g_center) {
+                                                g_center->toggle();
+                                        }
+                                }
                         }
                         free(payload);
                 }
@@ -1933,6 +2161,7 @@ private:
                 meraki_ipc_command(command.c_str());
         }
 
+        QList<QScreen *> m_screens;
         QList<QQuickView *> m_views;
         QTimer *m_timer = nullptr;
         QVariantList m_workspaces;
@@ -1953,7 +2182,6 @@ static void meraki_tray_listener(void) {
 }
 
 static HANDLE g_thread = nullptr;
-static QGuiApplication *g_app = nullptr;
 
 static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         (void)arg;
@@ -1968,19 +2196,19 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         MerakiBar bar;
         g_bar = &bar;
         bar.show();
-        MerakiDock *primaryDock = nullptr;
         const QList<QScreen *> screens = QGuiApplication::screens();
         for (QScreen *screen : screens) {
-                MerakiDock *dock = new MerakiDock(&app);
-                if (!primaryDock) {
-                        primaryDock = dock;
-                        g_dock = dock;
-                }
-                dock->show(screen);
+                dock_add_screen(screen);
         }
+        QObject::connect(&app, &QGuiApplication::screenAdded,
+                dock_add_screen);
+        QObject::connect(&app, &QGuiApplication::screenRemoved,
+                dock_remove_screen);
         MerakiCenter center;
         g_center = &center;
         center.init();
+        QObject::connect(&app, &QGuiApplication::primaryScreenChanged,
+                &center, &MerakiCenter::reposition);
         MerakiApps apps;
         g_apps = &apps;
         MerakiWidgets widgets;
@@ -1992,6 +2220,7 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         g_bar = nullptr;
         g_center = nullptr;
         g_dock = nullptr;
+        g_docks.clear();
         g_app = nullptr;
         g_fx = nullptr;
         return 0;

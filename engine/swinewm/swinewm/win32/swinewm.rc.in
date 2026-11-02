@@ -1,4 +1,4 @@
-// Icon and version information for swinewm.exe (configured by CMake).
+// Icon and version information for meraki.exe (configured by CMake).
 #include <winver.h>
 
 1 ICON "@SWINEWM_ICON@"
@@ -9,20 +9,20 @@ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
-	BLOCK "StringFileInfo"
-	BEGIN
-		BLOCK "040904B0"
-		BEGIN
-			VALUE "FileDescription", "SwineWM tiling window manager"
-			VALUE "FileVersion", "@SWINEWM_VERSION@"
-			VALUE "ProductName", "SwineWM"
-			VALUE "ProductVersion", "@SWINEWM_VERSION@"
-			VALUE "LegalCopyright", "MIT License"
-			VALUE "OriginalFilename", "swinewm.exe"
-		END
-	END
-	BLOCK "VarFileInfo"
-	BEGIN
-		VALUE "Translation", 0x0409, 1200
-	END
+        BLOCK "StringFileInfo"
+        BEGIN
+                BLOCK "040904B0"
+                BEGIN
+                        VALUE "FileDescription", "Meraki Desktop Environment"
+                        VALUE "FileVersion", "@SWINEWM_VERSION@"
+                        VALUE "ProductName", "Meraki"
+                        VALUE "ProductVersion", "@SWINEWM_VERSION@"
+                        VALUE "LegalCopyright", "MIT License"
+                        VALUE "OriginalFilename", "meraki.exe"
+                END
+        END
+        BLOCK "VarFileInfo"
+        BEGIN
+                VALUE "Translation", 0x0409, 1200
+        END
 END

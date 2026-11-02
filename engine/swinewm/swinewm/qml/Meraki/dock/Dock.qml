@@ -34,6 +34,17 @@ Item {
     Component.onCompleted: {
         bridge.dockRestHeight = margin + bgHeight
         rebuild()
+        Qt.callLater(syncWidth)
+    }
+
+    function syncWidth() {
+        bridge.dockWidth = slab.width + 16
+    }
+
+    onItemsChanged: Qt.callLater(syncWidth)
+    onHoveredChanged: {
+        bridge.dockHovered = hovered
+        Qt.callLater(syncWidth)
     }
 
     function slotRect(index) {
@@ -78,12 +89,6 @@ Item {
         var dist = Math.abs(mx - c0)
         var f = dist < magRadius ? 0.5 * (1 + Math.cos(Math.PI * dist / magRadius)) : 0
         return 1 + (effMag - 1) * f
-    }
-
-    Connections {
-        target: bridge
-        function onWindowsChanged() { root.rebuild() }
-        function onPinsChanged() { root.rebuild() }
     }
 
     MouseArea {
@@ -142,6 +147,7 @@ Item {
         x: (parent.width - width) / 2
         y: parent.height - root.margin - height
         width: row.width + 2 * root.hPad
+        onWidthChanged: root.syncWidth()
         height: root.bgHeight
         cornerRadius: 18
         bezel: Math.min(height * 0.36, 26)

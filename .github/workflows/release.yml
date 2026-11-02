@@ -30,9 +30,9 @@ jobs:
           $qtBin = Join-Path $qtRoot "bin"
           $out = "pack/Meraki"
           New-Item -ItemType Directory -Force $out | Out-Null
-          Copy-Item build/Release/swinewm.exe $out
+          Copy-Item build/Release/meraki.exe $out
           & (Join-Path $qtBin "windeployqt.exe") --release --no-translations `
-            --qmldir engine/swinewm/swinewm/qml (Join-Path $out "swinewm.exe")
+            --qmldir engine/swinewm/swinewm/qml (Join-Path $out "meraki.exe")
           if (-not (Test-Path (Join-Path $out "platforms/qwindows.dll"))) {
             throw "qwindows.dll missing"
           }
@@ -53,14 +53,24 @@ jobs:
           $notes = @"
           ## Meraki $env:GITHUB_REF_NAME
 
-          Тестовая сборка: тайлинг-движок SwineWM и оболочка Meraki.
+          Тестовая сборка: DE в стиле MacShell на движке SwineWM.
 
           ### Что нового
 
-          - Мультидисплей: бар с часами на каждом экране (трей — на основном),
-            док и виджеты на каждом мониторе.
-          - Настройка виджетов через `widgets.json`: какие карточки показывать,
-            размеры, сторона экрана, отступы, экраны, единицы погоды.
+          - Hotplug мониторов: бар, док и виджеты появляются и исчезают вместе
+            с экранами на ходу, центр уведомлений следует за основным.
+          - Виджеты можно перетаскивать мышью; позиции сохраняются в
+            `widgets.json` (секция `positions`) и применяются на всех экранах.
+            Изменения `widgets.json` подхватываются на лету.
+          - Центр уведомлений: закрывается кликом мимо, «Очистить» убирает и
+            историю, счётчик на часах в баре.
+          - Клавиши: низкоуровневый хук клавиатуры вынесен в отдельный поток —
+            биндинги больше не пропадают, когда оболочка занята.
+          - Win+D открывает Launchpad (родной лаунчер Meraki).
+          - Исполняемый файл теперь `meraki.exe` (в процессах и панели задач —
+            «Meraki», а не SwineWM).
+          - Док: ширина подгоняется под иконки, при наведении раскрывается
+            целиком, стекло прозрачное без обрезки.
 
           ### Как попробовать
 

@@ -6,7 +6,7 @@
 
 #define SHELL_KEY L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon"
 #define SHELL_VALUE L"Shell"
-#define ENGINE L"swinewm.exe"
+#define ENGINE L"meraki.exe"
 #define EXPLORER L"explorer.exe"
 
 static HWND g_status;
@@ -152,7 +152,7 @@ static void update_status(void)
         BOOL ours = shell_is_meraki();
         BOOL has_custom = registry_shell(shell, MAX_PATH);
         wsprintfW(text,
-                L"Оболочка: %s\r\nswinewm.exe: %s\r\nexplorer.exe: %s",
+                L"Оболочка: %s\r\nmeraki.exe: %s\r\nexplorer.exe: %s",
                 ours ? L"Meraki (прописан в реестре)"
                         : (has_custom ? L"своя (не Explorer)"
                                 : L"Explorer (по умолчанию)"),
@@ -170,7 +170,7 @@ static void on_install(void)
         engine_path(path, MAX_PATH * 2 - 2);
         if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
                 MessageBoxW(NULL,
-                        L"swinewm.exe не найден рядом со switcher.exe",
+                        L"meraki.exe не найден рядом со switcher.exe",
                         L"Meraki", MB_ICONERROR);
                 return;
         }
@@ -183,7 +183,7 @@ static void on_install(void)
         run_hidden(cmd);
         kill_by_name(EXPLORER);
         if (!process_running(ENGINE) && !spawn(path)) {
-                MessageBoxW(NULL, L"Не удалось запустить swinewm.exe",
+                MessageBoxW(NULL, L"Не удалось запустить meraki.exe",
                         L"Meraki", MB_ICONERROR);
         }
         update_status();

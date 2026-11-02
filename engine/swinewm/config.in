@@ -73,8 +73,10 @@ default_floating_border none
     # Kill focused window
     bindsym $mod+Shift+q kill
 
-    # Start your launcher
-    bindsym $mod+d exec $menu
+    # Open Meraki's Launchpad (the apps grid of the shell). "nop meraki:*"
+    # is handled by the Meraki shell itself; "exec $menu" would run the
+    # sway-style swinemenu instead.
+    bindsym $mod+d nop meraki:launchpad
 
     # Drag floating windows by holding down $mod and left mouse button.
     # Resize them with right mouse button + $mod.

@@ -163,6 +163,9 @@ if(WIN32)
     swinewm/win32/watch.c
     swinewm/win32/window.c
   )
+  # The user-facing binary is meraki.exe: the engine stays SwineWM inside,
+  # but processes, shortcuts and the shell entry all show Meraki.
+  set_target_properties(swinewm PROPERTIES OUTPUT_NAME meraki)
   target_compile_definitions(swinewm PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN
     WINVER=0x0A00 _WIN32_WINNT=0x0A00)
   target_link_libraries(swinewm PRIVATE swinewm_core user32 gdi32 dwmapi shell32

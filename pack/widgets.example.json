@@ -26,5 +26,9 @@
         "enabled": true,
         "width": 320,
         "height": 104
+    },
+    "positions": {
+        "clock": {"x": 1500, "y": 76},
+        "calendar": {"x": 1444, "y": 260}
     }
 }

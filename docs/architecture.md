@@ -1,6 +1,7 @@
 # Архитектура
 
-Один процесс `swinewm.exe` объединяет движок окон и оболочку Meraki.
+Один процесс `meraki.exe` (цель CMake — `swinewm`, OUTPUT_NAME `meraki`)
+объединяет движок окон и оболочку Meraki.
 
 ## Движок (`engine/`)
 
@@ -9,7 +10,7 @@
 (`notify-send.exe`, `makoctl.exe`), IPC-сервер i3/sway по именованному
 каналу `\\.\pipe\swinewm-ipc.<user>`, лаунчер `swinemenu.exe`,
 переключатель оболочки `switcher.exe` (`tools/switcher`: две кнопки —
-«Поставить Meraki» через `swinewm --set-shell` и «Вернуть Explorer»).
+«Поставить Meraki» через `meraki --set-shell` и «Вернуть Explorer»).
 
 Слои движка:
 
@@ -35,9 +36,10 @@ Qt Quick внутри процесса движка:
   `SWINE_IPC_CLOSE_NOTIFICATION`, тумблер — клик по часам (`toggleCenter`),
   окно без региона ввода вне панели (клики мимо проходят в окна)
 - `bridge.c` — поток-подписчик IPC (`SUBSCRIBE
-  ["workspace","window","notification"]`), события кладёт в очередь,
+  ["workspace","window","notification","binding"]`), события кладёт в очередь,
   QML-поток забирает по таймеру; notification-событие обновляет список
-  уведомлений;
+  уведомлений, binding-событие с командой `nop meraki:*` открывает
+  интерфейсы оболочки (Win+D → Launchpad) без движковых действий;
 - `capture.cpp` — `Windows.Graphics.Capture`: `LiveThumb` (живое превью
   окна, кадры GPU -> staging -> QImage) и `MerakiFx` (джинн: оверлей на весь
   экран, стоп-кадр, `SW_MINIMIZE`/`SW_RESTORE` с отключённым DWM-переходом);
@@ -52,8 +54,16 @@ Qt Quick внутри процесса движка:
 `widgets.json`): движок держит их прямо над обоями (`win32_desktop_layer_*`
 в `wallpaper.c`), регион ввода только под карточками; раскладка, размеры и
 состав карточек — в `~/.swinewm/widgets.json` (пример `pack/widgets.example.json`);
-медиа-данные даёт `media.cpp` (Windows GSMTC через C++/WinRT), погода —
-open-meteo прямо из QML.
+карточки перетаскиваются мышью, позиции падают в секцию `positions` того же
+файла, сам файл применяется на лету (QFileSystemWatcher); медиа-данные даёт
+`media.cpp` (Windows GSMTC через C++/WinRT), погода — open-meteo прямо из QML.
+
+Хотклен мониторов: `screenAdded`/`screenRemoved` QGuiApplication — бары,
+доки и виджеты создаются/снимаются на ходу; центр уведомлений следует за
+основным экраном (`primaryScreenChanged`). Низкоуровневый хук клавиатуры
+живёт в отдельном потоке со своим циклом сообщений — биндинги не пропадают,
+когда главный поток занят; список биндингов читается под rw-блокировкой на
+время перезагрузки конфига.
 
 Генси: клик по иконке сфокусированного окна -> стоп-кадр окна -> окно
 сворачивается -> вершинный шейдер `genie.vert` (сетка 6x64) льёт кадр в слот
