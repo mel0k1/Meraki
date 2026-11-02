@@ -323,6 +323,30 @@ void win32_shell_start(void) {
 
 // --- work area ----------------------------------------------------------
 
+// The QML shell strips (qmlbar): the menu bar at the top and the dock at
+// the bottom, in logical pixels. The layout must keep its windows clear of
+// them the same way it does for the built-in bar, and the Windows work area
+// (maximized and unmanaged windows) is derived from the same box.
+#define MERAKI_BAR_RESERVE 28
+#define MERAKI_DOCK_RESERVE 76
+
+// Added on top of the built-in bar's reservation: the strips the QML shell
+// draws itself. Qt's logical pixels follow the monitor DPI exactly like
+// output->scale does, so scaling by it lands on the same physical height.
+void win32_shell_reserve(const struct swine_output *output,
+		struct side_gaps *gaps) {
+	if (!win32_shell_mode) {
+		return;
+	}
+#ifdef MERAKI_QML
+	const double scale = output->scale > 0 ? output->scale : 1.0;
+	gaps->top += (int)(MERAKI_BAR_RESERVE * scale + 0.5);
+	gaps->bottom += (int)(MERAKI_DOCK_RESERVE * scale + 0.5);
+#else
+	(void)output;
+#endif
+}
+
 // As the shell, swinewm owns the work area that maximized and unmanaged
 // windows respect: the monitor minus the bar. With Explorer running the
 // taskbar owns it and swinewm only reserves the bar inside its own layout.

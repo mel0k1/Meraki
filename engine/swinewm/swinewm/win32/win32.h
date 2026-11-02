@@ -149,6 +149,10 @@ void win32_shell_resize_desktop(void);
 // swinewm's desktop window as the shell, or NULL.
 HWND win32_shell_desktop_window(void);
 void win32_shell_update_work_area(bool reset);
+// The QML shell's strips (menu bar, dock), on top of the built-in bar's
+// reservation; only under MERAKI_QML.
+void win32_shell_reserve(const struct swine_output *output,
+        struct side_gaps *gaps);
 void win32_shell_apply_taskbar(void);
 void win32_shell_restore_taskbar(void);
 bool win32_shell_recover_taskbar(void);

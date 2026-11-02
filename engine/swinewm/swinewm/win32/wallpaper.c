@@ -15,6 +15,7 @@
 #include "list.h"
 #include "log.h"
 #include "stringop.h"
+#include "fileutil.h"
 #include "swinewm/bar/css.h"
 #include "swinewm/config.h"
 #include "swinewm/tree/output.h"
@@ -435,6 +436,41 @@ void win32_wallpaper_paint(HDC dc, int origin_x, int origin_y) {
         }
 }
 
+// The wallpaper the QML shell's glass refracts: the path is written next to
+// the config so the bar and the dock show the same image the desktop paints
+// (SystemParametersInfo would miss "output * bg" wallpapers). Rewritten only
+// when the path changes; empty file = no wallpaper.
+static void write_shell_wallpaper(const char *path) {
+        static char *written = NULL;
+        static bool wrote_once = false;
+        bool same = wrote_once && ((written && path) ?
+                strcmp(written, path) == 0 : (!written && !path));
+        if (same) {
+                return;
+        }
+        free(written);
+        written = path ? swine_strdup(path) : NULL;
+        wrote_once = true;
+        wchar_t base[MAX_PATH];
+        DWORD n = GetEnvironmentVariableW(L"USERPROFILE", base, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH) {
+                return;
+        }
+        wchar_t dir[MAX_PATH];
+        _snwprintf(dir, MAX_PATH, L"%s\\.swinewm", base);
+        CreateDirectoryW(dir, NULL);
+        wchar_t file[MAX_PATH];
+        _snwprintf(file, MAX_PATH, L"%s\\.swinewm\\wallpaper.txt", base);
+        FILE *f = swine_fopen(file, "w");
+        if (!f) {
+                return;
+        }
+        if (path) {
+                fprintf(f, "%s", path);
+        }
+        fclose(f);
+}
+
 void win32_wallpaper_refresh(void) {
         if (!windows) {
                 windows = create_list();
@@ -503,6 +539,9 @@ void win32_wallpaper_refresh(void) {
                 }
                 free(sys);
         }
+        // The first output's wallpaper is the one the QML shell shows.
+        write_shell_wallpaper(windows->length ?
+                ((struct wallpaper_window *)windows->items[0])->path : NULL);
         if (desktop && repaint_desktop) {
                 InvalidateRect(desktop, NULL, FALSE);
         }

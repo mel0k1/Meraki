@@ -289,6 +289,11 @@ void win32_outputs_update(void) {
 			format_str("%s (%s)", output->identifier, output->name) : NULL;
 		output->primary = mi->primary;
 		output->box = box_from_rect(&mi->monitor);
+		UINT dpi_x = 96, dpi_y = 96;
+		if (SUCCEEDED(GetDpiForMonitor(mi->handle, MDT_EFFECTIVE_DPI, &dpi_x,
+				&dpi_y))) {
+			output->scale = dpi_x / 96.0;
+		}
 		// As the shell, swinewm sets the work area itself (monitor minus
 		// the bar); its own reservation is applied on top of the monitor.
 		// Next to Explorer, the work area without the bars' AppBar strips
@@ -298,10 +303,22 @@ void win32_outputs_update(void) {
 			win32_appbar_work_area(&work);
 		}
 		output->usable = win32_shell_mode ? output->box : box_from_rect(&work);
-		UINT dpi_x = 96, dpi_y = 96;
-		if (SUCCEEDED(GetDpiForMonitor(mi->handle, MDT_EFFECTIVE_DPI, &dpi_x,
-				&dpi_y))) {
-			output->scale = dpi_x / 96.0;
+		if (win32_shell_mode) {
+			// The QML shell's own strips (menu bar, dock): baked into
+			// the usable area, so the layout and the Windows work
+			// area keep their windows clear of them.
+			struct side_gaps gaps = {0, 0, 0, 0};
+			win32_shell_reserve(output, &gaps);
+			output->usable.x += gaps.left;
+			output->usable.y += gaps.top;
+			output->usable.width -= gaps.left + gaps.right;
+			output->usable.height -= gaps.top + gaps.bottom;
+			if (output->usable.width < 64) {
+				output->usable.width = 64;
+			}
+			if (output->usable.height < 64) {
+				output->usable.height = 64;
+			}
 		}
 		DEVMODEW current = { .dmSize = sizeof(current) };
 		wchar_t *device = device_name(output);
