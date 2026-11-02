@@ -51,6 +51,7 @@ Item {
             anchors.fill: parent
             source: bridge.wallpaper
             fillMode: Image.PreserveAspectCrop
+            asynchronous: true
         }
 
         Repeater {
