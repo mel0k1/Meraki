@@ -176,7 +176,8 @@ if(WIN32)
     set(MERAKI_QML_ROOT swinewm/qml)
     foreach(f Meraki/Main.qml Meraki/Bar.qml Meraki/Workspaces.qml Meraki/Clock.qml
         Meraki/MinimizeFx.qml Meraki/glass/LiquidGlass.qml Meraki/dock/Dock.qml
-        Meraki/dock/DockIcon.qml Meraki/dock/DockTip.qml Meraki/dock/Preview.qml)
+        Meraki/dock/DockIcon.qml Meraki/dock/DockTip.qml Meraki/dock/Preview.qml
+        Meraki/dock/DockMenu.qml)
       set_source_files_properties(${MERAKI_QML_ROOT}/${f} PROPERTIES QT_RESOURCE_ALIAS ${f})
     endforeach()
     qt_add_resources(swinewm "meraki_qml" PREFIX "/qml" FILES
@@ -189,7 +190,8 @@ if(WIN32)
       ${MERAKI_QML_ROOT}/Meraki/dock/Dock.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/DockIcon.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/DockTip.qml
-      ${MERAKI_QML_ROOT}/Meraki/dock/Preview.qml)
+      ${MERAKI_QML_ROOT}/Meraki/dock/Preview.qml
+      ${MERAKI_QML_ROOT}/Meraki/dock/DockMenu.qml)
     qt_add_shaders(swinewm "meraki_shaders" PREFIX "/shaders" FILES
       swinewm/qml/Meraki/shaders/liquidglass.frag
       swinewm/qml/Meraki/shaders/dockglass.frag)
@@ -233,6 +235,10 @@ if(WIN32)
   target_compile_definitions(swinemsg PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
   target_link_libraries(swinemsg PRIVATE swine_common)
   target_include_directories(swinemsg PRIVATE ${SWINEWM_GENERATED_DIR})
+
+  add_executable(switcher WIN32 tools/switcher/main.c)
+  target_compile_definitions(switcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+  target_link_libraries(switcher PRIVATE user32 gdi32 advapi32)
 
   # The front ends of the built-in Mako, named as on Linux so that scripts
   # and configs that call them keep working.

@@ -7,7 +7,9 @@
 Копия SwineWM: тилинг-менеджер окон на Win32 (конфиг sway), встроенный бар
 в стиле Waybar (в Meraki скрыт), Mako-совместимые уведомления
 (`notify-send.exe`, `makoctl.exe`), IPC-сервер i3/sway по именованному
-каналу `\\.\pipe\swinewm-ipc.<user>`, лаунчер `swinemenu.exe`.
+каналу `\\.\pipe\swinewm-ipc.<user>`, лаунчер `swinemenu.exe`,
+переключатель оболочки `switcher.exe` (`tools/switcher`: две кнопки —
+«Поставить Meraki» через `swinewm --set-shell` и «Вернуть Explorer»).
 
 Слои движка:
 
@@ -23,7 +25,9 @@ Qt Quick внутри процесса движка:
 - `qmlbar.cpp` — окно бара (frameless, поверх всех, прозрачный фон) и
   объект `bridge` для QML: свойства `workspaces`, `activeName`, команда
   `switchTo(n)`; `MerakiDock`: список окон из `IPC_GET_TREE` (id, hwnd,
-  iconic), иконки, пины
+  iconic), иконки, пины (`togglePin`, сохранение в `~/.swinewm/dock.json`),
+  контекстное меню пина — отдельное popup-окно `dock/DockMenu.qml`
+  (`showMenu`, закрытие приложения — `[con_id=N] kill`)
 - `bridge.c` — поток-подписчик IPC (`SUBSCRIBE ["workspace","window"]`),
   события кладёт в очередь, QML-поток забирает по таймеру;
 - `capture.cpp` — `Windows.Graphics.Capture`: `LiveThumb` (живое превью

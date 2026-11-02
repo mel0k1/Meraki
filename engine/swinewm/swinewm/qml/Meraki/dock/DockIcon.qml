@@ -66,16 +66,24 @@ Item {
         id: ma
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
-        onClicked: {
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: function(mouse) {
+            if (mouse.button === Qt.RightButton) {
+                var t = root.slotRect(cell.index)
+                bridge.showMenu(cell.modelData.key, cell.modelData.name,
+                    cell.modelData.pinned, cell.isRunning,
+                    t.x + t.width / 2, t.y)
+                return
+            }
             if (cell.isRunning) {
                 var w = cell.modelData.wins[0]
                 if (typeof fx !== "undefined" && fx && w.window > 0) {
-                    var t = root.slotRect(cell.index)
+                    var tr = root.slotRect(cell.index)
                     if (w.iconic) {
-                        fx.beginRestore(w.window, w.id, t.x, t.y, t.width, t.height)
+                        fx.beginRestore(w.window, w.id, tr.x, tr.y, tr.width, tr.height)
                     } else if (w.focused) {
                         fx.beginMinimize(w.window, w.id, w.x, w.y, w.w, w.h,
-                            t.x, t.y, t.width, t.height)
+                            tr.x, tr.y, tr.width, tr.height)
                     } else {
                         bridge.focusWindow(w.id)
                     }

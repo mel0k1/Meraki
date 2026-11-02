@@ -222,10 +222,27 @@ public:
 
 static MerakiFx *g_fx = nullptr;
 
+class MerakiMenu : public QObject {
+        Q_OBJECT
+        Q_PROPERTY(QString key MEMBER m_key NOTIFY changed)
+        Q_PROPERTY(QString name MEMBER m_name NOTIFY changed)
+        Q_PROPERTY(bool pinned MEMBER m_pinned NOTIFY changed)
+        Q_PROPERTY(bool running MEMBER m_running NOTIFY changed)
+
+public:
+        QString m_key;
+        QString m_name;
+        bool m_pinned = false;
+        bool m_running = false;
+
+signals:
+        void changed();
+};
+
 class MerakiDock : public QObject {
         Q_OBJECT
         Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
-        Q_PROPERTY(QVariantList pins MEMBER m_pins CONSTANT)
+        Q_PROPERTY(QVariantList pins READ pins NOTIFY pinsChanged)
         Q_PROPERTY(QVariantMap launching READ launching NOTIFY launchingChanged)
         Q_PROPERTY(int screenWidth READ screenWidth CONSTANT)
         Q_PROPERTY(int screenHeight READ screenHeight CONSTANT)
@@ -289,6 +306,10 @@ public:
                 return m_windows;
         }
 
+        QVariantList pins() const {
+                return m_pins;
+        }
+
         QVariantMap launching() const {
                 return m_launching;
         }
@@ -318,7 +339,69 @@ public:
                 emit launchingChanged();
         }
 
+        Q_INVOKABLE void togglePin(const QString &key) {
+                const QString lower = key.toLower();
+                for (int i = 0; i < m_pins.size(); ++i) {
+                        if (m_pins.at(i).toMap().value("key").toString().toLower() == lower) {
+                                m_pins.removeAt(i);
+                                savePins();
+                                emit pinsChanged();
+                                return;
+                        }
+                }
+                QString exe = meraki_exe_for(key);
+                if (exe.isEmpty()) {
+                        exe = key;
+                }
+                QString name = QFileInfo(exe).completeBaseName();
+                if (name.isEmpty()) {
+                        name = key;
+                }
+                QVariantMap pin;
+                pin.insert("key", key);
+                pin.insert("name", name.left(1).toUpper() + name.mid(1));
+                pin.insert("cmd", exe);
+                m_pins.append(pin);
+                savePins();
+                emit pinsChanged();
+        }
+
+        Q_INVOKABLE void closeApp(const QString &key) {
+                const QString lower = key.toLower();
+                for (const QVariant &v : m_windows) {
+                        const QVariantMap w = v.toMap();
+                        if (w.value("appId").toString().toLower() == lower) {
+                                runCommand("[con_id=" + std::to_string(
+                                        (long long)w.value("id").toLongLong()) + "] kill");
+                        }
+                }
+        }
+
+        Q_INVOKABLE void showMenu(const QString &key, const QString &name,
+                bool pinned, bool running, qreal ax, qreal ay) {
+                ensureMenuView();
+                m_menu->m_key = key;
+                m_menu->m_name = name;
+                m_menu->m_pinned = pinned;
+                m_menu->m_running = running;
+                emit m_menu->changed();
+                const int w = 224;
+                const int n = 1 + (running ? 1 : 0);
+                const int h = 42 + n * 40 + (n - 1) * 2 + 12;
+                int x = int(ax) - w / 2;
+                x = std::max(8, std::min(m_screenWidth - w - 8, x));
+                int y = std::max(8, int(ay) - h - 10);
+                m_menuView->setGeometry(x, y, w, h);
+                m_menuView->raise();
+                m_menuView->show();
+        }
+
 public slots:
+        void hideMenu() {
+                if (m_menuView) {
+                        m_menuView->hide();
+                }
+        }
         void refresh() {
                 char *error = nullptr;
                 char *payload = ipc_request(nullptr, IPC_GET_TREE, "", &error);
@@ -430,16 +513,59 @@ public slots:
 signals:
         void windowsChanged();
         void launchingChanged();
+        void pinsChanged();
 
 private:
         static void runCommand(const std::string &cmd) {
                 meraki_ipc_command(cmd.c_str());
         }
 
+        void ensureMenuView() {
+                if (m_menuView) {
+                        return;
+                }
+                m_menu = new MerakiMenu(this);
+                m_menuView = new QQuickView();
+                m_menuView->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
+                        Qt::Tool | Qt::NoDropShadowWindowHint);
+                m_menuView->setColor(Qt::transparent);
+                m_menuView->setResizeMode(QQuickView::SizeRootObjectToView);
+                m_menuView->rootContext()->setContextProperty("bridge", this);
+                m_menuView->rootContext()->setContextProperty("menu", m_menu);
+                m_menuView->setSource(QUrl(QStringLiteral("qrc:/qml/Meraki/dock/DockMenu.qml")));
+                QObject::connect(m_menuView, &QQuickWindow::activeChanged, this, [this]() {
+                        if (m_menuView && !m_menuView->isActive()) {
+                                m_menuView->hide();
+                        }
+                });
+                if (m_menuView->rootObject()) {
+                        QObject::connect(m_menuView->rootObject(), SIGNAL(done()),
+                                this, SLOT(hideMenu()));
+                }
+        }
+
+        void savePins() {
+                QJsonArray arr;
+                for (const QVariant &v : m_pins) {
+                        const QVariantMap p = v.toMap();
+                        QJsonObject o;
+                        o.insert("key", p.value("key").toString());
+                        o.insert("name", p.value("name").toString());
+                        o.insert("cmd", p.value("cmd").toString());
+                        arr.append(o);
+                }
+                QFile f(meraki_home_dir() + "/.swinewm/dock.json");
+                if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                        f.write(QJsonDocument(arr).toJson());
+                }
+        }
+
         void loadPins() {
                 QString path = meraki_home_dir() + "/.swinewm/dock.json";
                 QFile f(path);
+                bool loaded = false;
                 if (f.open(QIODevice::ReadOnly)) {
+                        loaded = true;
                         const QJsonArray arr = QJsonDocument::fromJson(f.readAll()).array();
                         for (const QJsonValue &v : arr) {
                                 const QJsonObject o = v.toObject();
@@ -461,7 +587,7 @@ private:
                                 }
                         }
                 }
-                if (m_pins.isEmpty()) {
+                if (!loaded) {
                         const char *defs[][2] = {
                                 {"explorer.exe", "Files"},
                                 {"msedge.exe", "Browser"},
@@ -479,6 +605,8 @@ private:
         }
 
         QQuickView *m_view = nullptr;
+        QQuickView *m_menuView = nullptr;
+        MerakiMenu *m_menu = nullptr;
         QTimer *m_regionTimer = nullptr;
         QTimer *m_pollTimer = nullptr;
         QTimer *m_launchTimer = nullptr;

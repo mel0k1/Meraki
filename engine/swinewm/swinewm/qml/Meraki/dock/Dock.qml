@@ -58,7 +58,7 @@ Item {
             var p = pins[i]
             var wins = windowsFor(p.key)
             seen[p.key] = true
-            list.push({ key: p.key, name: p.name, cmd: p.cmd, wins: wins })
+            list.push({ key: p.key, name: p.name, cmd: p.cmd, wins: wins, pinned: true })
         }
         var ws2 = bridge.windows
         for (var j = 0; j < ws2.length; j++) {
@@ -67,7 +67,7 @@ Item {
             var wl = windowsFor(k)
             if (wl.length === 0) continue
             seen[k] = true
-            list.push({ key: k, name: k, cmd: "", wins: wl })
+            list.push({ key: k, name: k, cmd: "", wins: wl, pinned: false })
         }
         items = list
     }
@@ -83,6 +83,7 @@ Item {
     Connections {
         target: bridge
         function onWindowsChanged() { root.rebuild() }
+        function onPinsChanged() { root.rebuild() }
     }
 
     MouseArea {
