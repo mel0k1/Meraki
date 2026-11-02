@@ -39,9 +39,17 @@ Qt Quick внутри процесса движка:
 - `capture.cpp` — `Windows.Graphics.Capture`: `LiveThumb` (живое превью
   окна, кадры GPU -> staging -> QImage) и `MerakiFx` (джинн: оверлей на весь
   экран, стоп-кадр, `SW_MINIMIZE`/`SW_RESTORE` с отключённым DWM-переходом);
-- `qml/Meraki/*.qml` — интерфейс: бар, док с иконками и Liquid Glass
-  (`shaders/`, `glass/`, `dock/`), живые превью (`dock/Preview.qml`),
-  генси (`MinimizeFx.qml`), пилюли рабочих столов, часы.
+- `qml/Meraki/*.qml` — интерфейс: бар (работает столы, трей `Tray.qml`,
+  кнопка меню запуска), док с иконками и Liquid Glass (`shaders/`,
+  `glass/`, `dock/`), живые превью (`dock/Preview.qml`), генси
+  (`MinimizeFx.qml`), меню запуска (`apps/Launchpad.qml`), виджеты
+  (`widgets/`: часы, календарь, погода, музыка), пилюли рабочих столов,
+  часы.
+
+Виджеты — отдельное окно слоя рабочего стола: движок держит его прямо над
+обоями (`win32_desktop_layer_*` в `wallpaper.c`), регион ввода только под
+карточками; медиа-данные даёт `media.cpp` (Windows GSMTC через C++/WinRT),
+погода — open-meteo прямо из QML.
 
 Генси: клик по иконке сфокусированного окна -> стоп-кадр окна -> окно
 сворачивается -> вершинный шейдер `genie.vert` (сетка 6x64) льёт кадр в слот

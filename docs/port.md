@@ -13,6 +13,15 @@
 - `swinewm/CMakeLists.txt` — опция `MERAKI_QML`, Qt Quick, ресурсы QML
 - `swinewm/config.in` — нативный бар скрыт (`bar mode invisible`)
 - `swinewm/qmlbar/` — сам слой (новое)
+- `swinewm/qmlbar/media.cpp` — `MerakiMedia`: системный медиа-контрол через
+  `GlobalSystemMediaTransportControlsSessionManager` (C++/WinRT): трек,
+  исполнитель, play/pause, next/prev
+- `swinewm/win32/tray.c` — для QML-слоя: `win32_tray_force` (хост
+  уведомлений без модуля трея в C-баре), `win32_tray_set_listener`
+  (обратный вызов об изменениях), `win32_tray_icon_bits` (копия иконки)
+- `swinewm/win32/wallpaper.c` — `win32_desktop_layer_register`/
+  `win32_desktop_layer_place`: окно виджетов живёт прямо над обоями и не
+  мешает раскладке обоев/десктопа
 - `swinewm/qmlbar/capture.cpp` — `Windows.Graphics.Capture` через C++/WinRT:
   `LiveThumb` (живое превью окна в QML) и `MerakiFx` (стоп-кадр окна,
   полноэкранный оверлей для genie, кэш кадров для восстановления)
@@ -57,8 +66,32 @@
   регион ввода сжимается под панель, клики мимо проходят в окна
 - `MinimizeFx.qml` + `shaders/genie.vert`/`genie.frag` — генси: стоп-кадр
   окна, DWM-переход отключается, окно сворачивается, сетка 6x64 льёт кадр
-  в слот дока (bezье 0.22/0.8/0.28/1.0, 0.42 с); восстановление — обратная
+  в слот дока (безье 0.22/0.8/0.28/1.0, 0.42 с); восстановление — обратная
   деформация из кэша кадра, затем `SW_RESTORE` и фейд оверлея 180 мс
+- UWP-иконки (`qmlbar.cpp`): AUMID окна — через `SHGetPropertyStoreForWindow`
+  (`System.AppUserModel.ID`) или `Windows.UI.Core.CoreWindow` +
+  `GetApplicationUserModelId`; иконка — `shell:AppsFolder/<aumid>` через
+  `IShellItemImageFactory::GetImage` (SIIGBF_ICONONLY, PNG-премультипликация
+  разворачивается), кэш в `~/.swinewm/cache/icons`; UWP-окна группируются в
+  доке по AUMID (а не по ApplicationFrameHost), имя — отображаемое имя из
+  shell-элемента, пин запускается через `explorer.exe shell:AppsFolder/...`
+- `Tray.qml` — трей в баре слева от часов: иконки хоста уведомлений
+  (`Shell_TrayWnd`-протокол движка), клики и ховер пересылаются программам
+  (`win32_tray_mouse`/`win32_tray_hover`), хост-прямоугольник — область
+  трея в баре (для меню программ); снапшот иконок через listener движка
+- `apps/Launchpad.qml` + `MerakiApps` — меню запуска: все ярлыки меню «Пуск»
+  (`.lnk`/`.url` из `FOLDERID_Programs` и `FOLDERID_CommonPrograms`, без
+  автозагрузки), поиск по мере ввода, Enter — первая программа, запуск —
+  `ShellExecuteExW`, иконки jumbo из ярлыка; открывается кнопкой-сеткой в
+  левом углу бара, Esc/клик мимо — закрыть
+- `widgets/` — виджеты рабочего стола: слой отдельным окном прямо над
+  обоями (`win32_desktop_layer_*`, WS_EX_NOACTIVATE, регион ввода только
+  под карточками) на стеклянных панелях DockGlassPanel: часы (аналоговые,
+  плавная секундная), календарь (месяц по локали системы, подсветка
+  сегодня), погода (open-meteo, WMO-код -> глиф WeatherGlyph, почасовой
+  прогноз на 4 часа, город/координаты из `~/.swinewm/widgets.json`, по
+  умолчанию Москва) и музыка (трек/исполнитель/кнопки из системного
+  медиа-контрола); карточки, не влезающие по высоте экрана, скрываются
 
 Фон стекла — обои плюс прямоугольники окон из IPC-дерева; уведомления
 берутся из встроенного в движок Mako (`notify-send.exe` из пакета движка
@@ -69,6 +102,6 @@ Hyprland- и Quickshell-зависимости оригинала заменен
 
 ## Roadmap
 
-1. Виджеты рабочего стола (погода, календарь, музыка) из MacShell
-2. Трей и меню запуска в QML-баре, мультидисплей
-3. Иконки UWP-приложений
+1. Мультидисплей: бар, док и виджеты на каждом экране
+2. Настройка виджетов (перетаскивание, размеры, список в widgets.json)
+3. Тег и GitHub Release с артефактами
