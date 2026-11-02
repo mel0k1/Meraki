@@ -173,14 +173,18 @@ if(WIN32)
     target_sources(swinewm PRIVATE
       swinewm/qmlbar/bridge.c
       swinewm/qmlbar/qmlbar.cpp
-      swinewm/qmlbar/capture.cpp)
+      swinewm/qmlbar/capture.cpp
+      swinewm/qmlbar/media.cpp)
     set(MERAKI_QML_ROOT swinewm/qml)
     foreach(f Meraki/Main.qml Meraki/Bar.qml Meraki/Tray.qml Meraki/Workspaces.qml Meraki/Clock.qml
         Meraki/MinimizeFx.qml Meraki/glass/LiquidGlass.qml
         Meraki/glass/DockGlassPanel.qml Meraki/dock/Dock.qml
         Meraki/dock/DockIcon.qml Meraki/dock/DockTip.qml Meraki/dock/Preview.qml
         Meraki/dock/DockMenu.qml Meraki/center/Center.qml
-        Meraki/apps/Launchpad.qml)
+        Meraki/apps/Launchpad.qml Meraki/widgets/Widgets.qml
+        Meraki/widgets/ClockCard.qml Meraki/widgets/CalendarCard.qml
+        Meraki/widgets/WeatherCard.qml Meraki/widgets/MediaCard.qml
+        Meraki/widgets/WeatherGlyph.qml)
       set_source_files_properties(${MERAKI_QML_ROOT}/${f} PROPERTIES QT_RESOURCE_ALIAS ${f})
     endforeach()
     qt_add_resources(swinewm "meraki_qml" PREFIX "/qml" FILES
@@ -198,7 +202,13 @@ if(WIN32)
       ${MERAKI_QML_ROOT}/Meraki/dock/Preview.qml
       ${MERAKI_QML_ROOT}/Meraki/dock/DockMenu.qml
       ${MERAKI_QML_ROOT}/Meraki/center/Center.qml
-      ${MERAKI_QML_ROOT}/Meraki/apps/Launchpad.qml)
+      ${MERAKI_QML_ROOT}/Meraki/apps/Launchpad.qml
+      ${MERAKI_QML_ROOT}/Meraki/widgets/Widgets.qml
+      ${MERAKI_QML_ROOT}/Meraki/widgets/ClockCard.qml
+      ${MERAKI_QML_ROOT}/Meraki/widgets/CalendarCard.qml
+      ${MERAKI_QML_ROOT}/Meraki/widgets/WeatherCard.qml
+      ${MERAKI_QML_ROOT}/Meraki/widgets/MediaCard.qml
+      ${MERAKI_QML_ROOT}/Meraki/widgets/WeatherGlyph.qml)
     qt_add_shaders(swinewm "meraki_shaders" PREFIX "/shaders" FILES
       swinewm/qml/Meraki/shaders/liquidglass.frag
       swinewm/qml/Meraki/shaders/dockglass.frag)
