@@ -193,12 +193,17 @@ if(WIN32)
     qt_add_shaders(swinewm "meraki_shaders" PREFIX "/shaders" FILES
       swinewm/qml/Meraki/shaders/liquidglass.frag
       swinewm/qml/Meraki/shaders/dockglass.frag)
+    get_filename_component(_qt_prefix_dir ${Qt6_DIR}/../../.. ABSOLUTE)
+    find_program(QSB_EXEC qsb HINTS ${QT6_INSTALL_BINS} ${_qt_prefix_dir}/bin)
+    if(NOT QSB_EXEC)
+      message(FATAL_ERROR "qsb not found")
+    endif()
     set(GENIE_FRAG_QSB ${CMAKE_CURRENT_BINARY_DIR}/genie.frag.qsb)
     set(GENIE_VERT_QSB ${CMAKE_CURRENT_BINARY_DIR}/genie.vert.qsb)
     add_custom_command(OUTPUT ${GENIE_FRAG_QSB} ${GENIE_VERT_QSB}
-      COMMAND ${QT6_INSTALL_BINS}/qsb --qt6 -o ${GENIE_FRAG_QSB}
+      COMMAND ${QSB_EXEC} --qt6 -o ${GENIE_FRAG_QSB}
         ${CMAKE_CURRENT_SOURCE_DIR}/swinewm/qml/Meraki/shaders/genie.frag
-      COMMAND ${QT6_INSTALL_BINS}/qsb --qt6 -o ${GENIE_VERT_QSB}
+      COMMAND ${QSB_EXEC} --qt6 -o ${GENIE_VERT_QSB}
         ${CMAKE_CURRENT_SOURCE_DIR}/swinewm/qml/Meraki/shaders/genie.vert
       DEPENDS swinewm/qml/Meraki/shaders/genie.frag
         swinewm/qml/Meraki/shaders/genie.vert
