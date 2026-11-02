@@ -21,6 +21,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QMutex>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickImageProvider>
@@ -45,6 +46,25 @@ extern "C" {
 #include "ipc-client.h"
 #include "ipc.h"
 #include "qmlbar.h"
+#include <list.h>
+#include <swinewm/bar/tray.h>
+}
+
+extern "C" {
+enum tray_hover {
+        TRAY_HOVER_MOVE,
+        TRAY_HOVER_POPUP,
+        TRAY_HOVER_LEAVE
+};
+bool win32_tray_hover(uint64_t id, enum tray_hover what, POINT screen);
+void win32_tray_mouse(uint64_t id, int button, bool down, POINT screen);
+void win32_tray_set_host_rect(const RECT *screen);
+void win32_tray_force(bool on);
+void win32_tray_set_listener(void (*fn)(void));
+bool win32_tray_icon_bits(uint64_t id, int size, int *w, int *h,
+        unsigned char **out);
+void win32_desktop_layer_register(HWND hwnd);
+bool win32_desktop_layer_place(HWND hwnd);
 }
 
 extern "C" void meraki_ipc_command(const char *cmd) {
@@ -371,6 +391,80 @@ public:
                 return pm;
         }
 };
+
+static QImage meraki_tray_image(qint64 id) {
+        int w = 0, h = 0;
+        unsigned char *bits = nullptr;
+        if (!win32_tray_icon_bits((uint64_t)id, 32, &w, &h, &bits) || !bits) {
+                return QImage();
+        }
+        QImage raw(bits, w, h, w * 4, QImage::Format_ARGB32);
+        QImage out = raw.copy();
+        free(bits);
+        return out;
+}
+
+class TrayIconProvider : public QQuickImageProvider {
+public:
+        TrayIconProvider() : QQuickImageProvider(QQuickImageProvider::Pixmap) {}
+
+        QPixmap requestPixmap(const QString &id, QSize *size,
+                const QSize &requested) override {
+                const QString key = id.section('?', 0, 0);
+                QPixmap pm;
+                auto it = m_cache.find(key);
+                if (it != m_cache.end()) {
+                        pm = it->second;
+                } else {
+                        QImage img = meraki_tray_image(key.toLongLong());
+                        if (!img.isNull()) {
+                                pm = QPixmap::fromImage(img);
+                                if (m_cache.size() > 96) {
+                                        m_cache.clear();
+                                }
+                                m_cache[key] = pm;
+                        }
+                }
+                if (size) {
+                        *size = pm.size();
+                }
+                if (requested.isValid() && requested.width() > 0 &&
+                        requested.height() > 0) {
+                        return pm.scaled(requested, Qt::KeepAspectRatio,
+                                Qt::SmoothTransformation);
+                }
+                return pm;
+        }
+
+private:
+        std::map<std::string, QPixmap> m_cache;
+};
+
+static QMutex g_tray_mutex;
+static QByteArray g_tray_json;
+
+static void meraki_tray_snapshot(void) {
+        QJsonArray arr;
+        list_t *items = tray_get_items();
+        if (items) {
+                for (int i = 0; i < (int)items->length; ++i) {
+                        struct tray_item *item = (struct tray_item *)items->items[i];
+                        if (item->passive) {
+                                continue;
+                        }
+                        QJsonObject o;
+                        o.insert("id", (qlonglong)item->id);
+                        o.insert("appId", QString::fromUtf8(
+                                item->app_id ? item->app_id : ""));
+                        o.insert("title", QString::fromUtf8(
+                                item->title ? item->title : ""));
+                        arr.append(o);
+                }
+        }
+        const QByteArray data = QJsonDocument(arr).toJson();
+        QMutexLocker lock(&g_tray_mutex);
+        g_tray_json = data;
+}
 
 static MerakiFx *g_fx = nullptr;
 
@@ -1101,6 +1195,8 @@ class MerakiBar : public QObject {
         Q_PROPERTY(QString activeName READ activeName NOTIFY workspacesChanged)
         Q_PROPERTY(bool centerOpen READ centerOpen NOTIFY centerChanged)
         Q_PROPERTY(int centerCount READ centerCount NOTIFY centerChanged)
+        Q_PROPERTY(QVariantList trayItems READ trayItems NOTIFY trayChanged)
+        Q_PROPERTY(int trayGen READ trayGen NOTIFY trayChanged)
 
 public:
         explicit MerakiBar(QObject *parent = nullptr) : QObject(parent) {
@@ -1122,6 +1218,8 @@ public:
                 m_view->setColor(Qt::transparent);
                 m_view->setResizeMode(QQuickView::SizeRootObjectToView);
                 m_view->rootContext()->setContextProperty("bridge", this);
+                m_view->engine()->addImageProvider("trayicon",
+                        new TrayIconProvider());
                 m_view->setSource(QUrl(QStringLiteral("qrc:/qml/Meraki/Main.qml")));
                 if (QScreen *screen = QGuiApplication::primaryScreen()) {
                         const QRect geometry = screen->geometry();
@@ -1129,6 +1227,7 @@ public:
                 }
                 refresh();
                 m_view->show();
+                syncTray();
         }
 
         QVariantList workspaces() const {
@@ -1159,7 +1258,49 @@ public:
                 }
         }
 
+        QVariantList trayItems() const {
+                return m_trayItems;
+        }
+
+        int trayGen() const {
+                return m_trayGen;
+        }
+
+        Q_INVOKABLE void trayMouse(qint64 id, int button, bool down, qreal sx,
+                qreal sy) {
+                POINT p = { (long)sx, (long)sy };
+                win32_tray_mouse((uint64_t)id, button, down, p);
+        }
+
+        Q_INVOKABLE void trayHover(qint64 id, int what, qreal sx, qreal sy) {
+                POINT p = { (long)sx, (long)sy };
+                win32_tray_hover((uint64_t)id, (enum tray_hover)what, p);
+        }
+
+        Q_INVOKABLE void trayRect(qreal x, qreal y, qreal w, qreal h) {
+                RECT r = { (long)x, (long)y, (long)(x + w), (long)(y + h) };
+                win32_tray_set_host_rect(&r);
+        }
+
 public slots:
+        void syncTray() {
+                QByteArray data;
+                {
+                        QMutexLocker lock(&g_tray_mutex);
+                        data = g_tray_json;
+                }
+                QVariantList list;
+                const QJsonArray arr = QJsonDocument::fromJson(data).array();
+                for (const QJsonValue &v : arr) {
+                        list.append(v.toObject().toVariantMap());
+                }
+                if (list != m_trayItems) {
+                        m_trayItems = list;
+                        ++m_trayGen;
+                        emit trayChanged();
+                }
+        }
+
         void poll() {
                 bool got = false;
                 for (;;) {
@@ -1227,6 +1368,7 @@ public slots:
 signals:
         void workspacesChanged();
         void centerChanged();
+        void trayChanged();
 
 private:
         static void runCommand(const std::string &command) {
@@ -1239,7 +1381,18 @@ private:
         QString m_activeName;
         int m_centerCount = 0;
         bool m_centerOpen = false;
+        QVariantList m_trayItems;
+        int m_trayGen = 0;
 };
+
+static MerakiBar *g_bar = nullptr;
+
+static void meraki_tray_listener(void) {
+        meraki_tray_snapshot();
+        if (g_bar) {
+                QMetaObject::invokeMethod(g_bar, "syncTray", Qt::QueuedConnection);
+        }
+}
 
 static HANDLE g_thread = nullptr;
 static QGuiApplication *g_app = nullptr;
@@ -1255,6 +1408,7 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         g_fx = &fx;
         fx.show();
         MerakiBar bar;
+        g_bar = &bar;
         bar.show();
         MerakiDock dock;
         g_dock = &dock;
@@ -1263,6 +1417,7 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         g_center = &center;
         center.init();
         app.exec();
+        g_bar = nullptr;
         g_center = nullptr;
         g_dock = nullptr;
         g_app = nullptr;
@@ -1272,6 +1427,8 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
 
 extern "C" void meraki_qml_start(void) {
         meraki_bridge_start();
+        win32_tray_set_listener(meraki_tray_listener);
+        win32_tray_force(true);
         g_thread = CreateThread(nullptr, 0, meraki_qml_main, nullptr, 0, nullptr);
 }
 

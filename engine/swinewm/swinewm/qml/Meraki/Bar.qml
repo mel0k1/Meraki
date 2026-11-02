@@ -37,9 +37,18 @@ Rectangle {
     }
 
     Clock {
+        id: clock
         anchors {
             right: parent.right
             rightMargin: 14
+            verticalCenter: parent.verticalCenter
+        }
+    }
+
+    Tray {
+        anchors {
+            right: clock.left
+            rightMargin: 16
             verticalCenter: parent.verticalCenter
         }
     }

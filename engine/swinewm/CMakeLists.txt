@@ -175,7 +175,7 @@ if(WIN32)
       swinewm/qmlbar/qmlbar.cpp
       swinewm/qmlbar/capture.cpp)
     set(MERAKI_QML_ROOT swinewm/qml)
-    foreach(f Meraki/Main.qml Meraki/Bar.qml Meraki/Workspaces.qml Meraki/Clock.qml
+    foreach(f Meraki/Main.qml Meraki/Bar.qml Meraki/Tray.qml Meraki/Workspaces.qml Meraki/Clock.qml
         Meraki/MinimizeFx.qml Meraki/glass/LiquidGlass.qml
         Meraki/glass/DockGlassPanel.qml Meraki/dock/Dock.qml
         Meraki/dock/DockIcon.qml Meraki/dock/DockTip.qml Meraki/dock/Preview.qml
@@ -185,6 +185,7 @@ if(WIN32)
     qt_add_resources(swinewm "meraki_qml" PREFIX "/qml" FILES
       ${MERAKI_QML_ROOT}/Meraki/Main.qml
       ${MERAKI_QML_ROOT}/Meraki/Bar.qml
+      ${MERAKI_QML_ROOT}/Meraki/Tray.qml
       ${MERAKI_QML_ROOT}/Meraki/Workspaces.qml
       ${MERAKI_QML_ROOT}/Meraki/Clock.qml
       ${MERAKI_QML_ROOT}/Meraki/MinimizeFx.qml

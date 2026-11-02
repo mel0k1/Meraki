@@ -62,7 +62,7 @@ void win32_scripts_finish(void);
 HFONT win32_font(const char *families, int px, bool bold, bool italic);
 // The same, rotated counter-clockwise by degrees (0, 90, 180, 270).
 HFONT win32_font_rotated(const char *families, int px, bool bold, bool italic,
-		int degrees);
+                int degrees);
 void win32_fonts_clear(void);
 // A sway "font" description ("pango:DejaVu Sans Mono 10") at a scale.
 HFONT win32_sway_font(const char *desc, double scale);
@@ -72,15 +72,15 @@ double win32_output_scale(struct swine_output *output);
 
 // canvas.c: per-pixel alpha drawing for layered windows (bar, popups)
 struct canvas {
-	HDC dc;              // the bitmap below, for measuring text
-	uint32_t *px;        // premultiplied BGRA, top-down
-	HDC mask_dc;         // black, for text and icons
-	uint32_t *mask;
-	HDC white_dc;        // white, for icons
-	uint32_t *white;
-	int w, h;
-	HBITMAP bitmap, mask_bitmap, white_bitmap;
-	HGDIOBJ old[3];
+        HDC dc;              // the bitmap below, for measuring text
+        uint32_t *px;        // premultiplied BGRA, top-down
+        HDC mask_dc;         // black, for text and icons
+        uint32_t *mask;
+        HDC white_dc;        // white, for icons
+        uint32_t *white;
+        int w, h;
+        HBITMAP bitmap, mask_bitmap, white_bitmap;
+        HGDIOBJ old[3];
 };
 HBITMAP win32_dib(HDC ref, int w, int h, uint32_t **bits);
 // A transparent canvas of w x h; false if the bitmaps cannot be made.
@@ -90,33 +90,33 @@ void canvas_finish(struct canvas *c);
 bool canvas_clip(const struct canvas *c, const RECT *r, RECT *out);
 // "Source over" of a premultiplied pixel.
 uint32_t canvas_over(uint32_t dst, unsigned r, unsigned g, unsigned b,
-		unsigned a);
+                unsigned a);
 void canvas_fill(struct canvas *c, const RECT *rect, struct swine_color color);
 // Text: clear the mask (and, for icons, the white copy) in rect, draw white
 // text into mask_dc (or the icon into mask_dc and white_dc), then blend.
 void canvas_mask_clear(struct canvas *c, const RECT *rect, bool white);
 void canvas_mask_blend(struct canvas *c, const RECT *rect,
-		struct swine_color color);
+                struct swine_color color);
 void canvas_icon_blend(struct canvas *c, const RECT *rect);
 // Coverage (0-255) of pixel x, y by a rounded rectangle; radii from the
 // top-left corner clockwise.
 unsigned canvas_rounded_coverage(const RECT *r, const double radii[4],
-		int x, int y);
+                int x, int y);
 // A rounded box: background, and a border of `border` pixels inside its
 // edge, blended over what is there.
 void canvas_box(struct canvas *c, const RECT *r, double radius,
-		struct swine_color background, int border,
-		struct swine_color border_color);
+                struct swine_color background, int border,
+                struct swine_color border_color);
 // Draws premultiplied BGRA pixels, with rounded corners if radius > 0.
 void canvas_image(struct canvas *c, int x, int y, int w, int h,
-		const uint32_t *src, double radius);
+                const uint32_t *src, double radius);
 // Shows the canvas as hwnd's content at x, y (UpdateLayeredWindow).
 void canvas_present(struct canvas *c, HWND hwnd, int x, int y);
 
 // wallpaper.c: images through WIC
 // Decodes path scaled by scale into a premultiplied top-down 32-bit DIB.
 HBITMAP win32_image_load(const char *path, int *width, int *height,
-		double scale);
+                double scale);
 bool win32_image_size(const char *path, UINT *width, UINT *height);
 
 // titlebar.c: tabs of tabbed and stacked containers
@@ -176,16 +176,21 @@ void win32_tray_crash(void);
 void win32_tray_recover(void);
 void win32_tray_handle_message(WPARAM wparam, LPARAM lparam);
 void win32_tray_draw(HDC dc, uint64_t id, const char *icon_path,
-		const RECT *rect, HWND bar);
+                const RECT *rect, HWND bar);
 void win32_tray_set_host_rect(const RECT *screen);
 // button: 0 left, 1 middle, 2 right
 void win32_tray_mouse(uint64_t id, int button, bool down, POINT screen);
 enum tray_hover {
-	TRAY_HOVER_MOVE,
-	TRAY_HOVER_POPUP,
-	TRAY_HOVER_LEAVE,
+        TRAY_HOVER_MOVE,
+        TRAY_HOVER_POPUP,
+        TRAY_HOVER_LEAVE,
 };
 bool win32_tray_hover(uint64_t id, enum tray_hover what, POINT screen);
+// QML bar: keep the area hosted even without the C bar's tray module.
+void win32_tray_force(bool on);
+void win32_tray_set_listener(void (*fn)(void));
+bool win32_tray_icon_bits(uint64_t id, int size, int *w, int *h,
+                unsigned char **out);
 
 // window.c
 // The executable's file name ("Discord.exe"), or NULL.
@@ -193,6 +198,11 @@ char *win32_process_name(DWORD pid);
 
 // wallpaper.c
 void win32_wallpaper_refresh(void);
+// Registers a QML-layer window (desktop widgets) that must sit directly
+// above the wallpapers and out of desktop_top()'s way.
+void win32_desktop_layer_register(HWND hwnd);
+// Places the window directly above the desktop if it drifted; true if moved.
+bool win32_desktop_layer_place(HWND hwnd);
 // As the shell: draws the wallpapers into the desktop window, whose client
 // area starts at (origin_x, origin_y) on the virtual screen.
 void win32_wallpaper_paint(HDC dc, int origin_x, int origin_y);
@@ -256,11 +266,11 @@ extern int win32_busy;
 
 // ipc.c
 struct win32_ipc_request {
-	uint32_t type;
-	const char *payload;
-	uint32_t length;
-	char *reply;
-	uint32_t reply_type;
+        uint32_t type;
+        const char *payload;
+        uint32_t length;
+        char *reply;
+        uint32_t reply_type;
 };
 bool win32_ipc_init(void);
 void win32_ipc_handle(struct win32_ipc_request *request);
