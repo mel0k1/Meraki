@@ -25,7 +25,9 @@ jobs:
       - name: deploy
         shell: pwsh
         run: |
-          $qtBin = Join-Path (Resolve-Path (Join-Path $env:Qt6_DIR "..\..\..")) "bin"
+          $qtRoot = $env:QT_ROOT_DIR
+          if (-not $qtRoot) { $qtRoot = $env:Qt6_DIR }
+          $qtBin = Join-Path $qtRoot "bin"
           $out = "pack/Meraki"
           New-Item -ItemType Directory -Force $out | Out-Null
           & (Join-Path $qtBin "windeployqt.exe") --release --no-translations `
