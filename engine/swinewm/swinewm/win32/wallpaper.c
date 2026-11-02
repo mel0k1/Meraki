@@ -72,6 +72,44 @@ static bool is_wallpaper_window(HWND hwnd) {
                 wcscmp(cls, L"swinewm-wallpaper") == 0;
 }
 
+// The user's current Windows wallpaper; Meraki never imposes one of its
+// own and only draws what the user has already chosen.
+static char *system_wallpaper(void) {
+        wchar_t path[MAX_PATH];
+        if (!SystemParametersInfoW(SPI_GETDESKWALLPAPER, MAX_PATH, path, 0) ||
+                        !path[0]) {
+                return NULL;
+        }
+        return utf16_to_utf8(path);
+}
+
+// The background to paint for an output: what the config sets, else the
+// user's current Windows wallpaper. Returns false when nothing should be
+// painted; *sys_path receives a malloc'd path to free by the caller when
+// the fallback is used.
+static bool effective_background(const char *output_name,
+        struct output_config *synth, char **sys_path,
+        struct output_config **out) {
+        *sys_path = NULL;
+        struct output_config *oc = output_config_for_name(output_name);
+        if (oc && oc->background) {
+                *out = oc;
+                return true;
+        }
+        char *path = system_wallpaper();
+        if (!path) {
+                return false;
+        }
+        memset(synth, 0, sizeof(*synth));
+        synth->background = path;
+        synth->background_mode = oc && oc->background_mode
+                ? oc->background_mode : "fill";
+        synth->background_fallback = oc ? oc->background_fallback : NULL;
+        *sys_path = path;
+        *out = synth;
+        return true;
+}
+
 // The window our wallpapers must sit directly above: the highest of the
 // desktop windows at the bottom of the Z order, or NULL without Explorer.
 static HWND desktop_top(void) {
@@ -406,8 +444,13 @@ void win32_wallpaper_refresh(void) {
         // Drop windows for outputs that are gone or have no background.
         for (int i = windows->length - 1; i >= 0; --i) {
                 struct wallpaper_window *ww = windows->items[i];
-                struct output_config *oc = output_config_for_name(ww->output_name);
-                if (!output_by_name(ww->output_name) || !oc || !oc->background) {
+                struct output_config synth;
+                char *sys = NULL;
+                struct output_config *oc = NULL;
+                bool have = output_by_name(ww->output_name) &&
+                        effective_background(ww->output_name, &synth, &sys, &oc);
+                free(sys);
+                if (!have) {
                         destroy_window(ww);
                         list_del(windows, i);
                         repaint_desktop = true;
@@ -415,8 +458,10 @@ void win32_wallpaper_refresh(void) {
         }
         for (int i = 0; i < root->outputs->length; ++i) {
                 struct swine_output *output = root->outputs->items[i];
-                struct output_config *oc = output_config_for_name(output->name);
-                if (!oc || !oc->background) {
+                struct output_config synth;
+                char *sys = NULL;
+                struct output_config *oc = NULL;
+                if (!effective_background(output->name, &synth, &sys, &oc)) {
                         continue;
                 }
                 struct wallpaper_window *ww = find_window(output->name);
@@ -456,6 +501,7 @@ void win32_wallpaper_refresh(void) {
                         ww->y = box->y;
                         repaint_desktop = true;
                 }
+                free(sys);
         }
         if (desktop && repaint_desktop) {
                 InvalidateRect(desktop, NULL, FALSE);
