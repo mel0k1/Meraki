@@ -9,6 +9,7 @@
 
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QPainter>
 #include <QQuickImageProvider>
 #include <QQuickView>
 #include <QScreen>
@@ -16,8 +17,11 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <utility>
+
+#include <dwmapi.h>
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
@@ -34,6 +38,7 @@ extern "C" {
 using namespace winrt;
 using namespace winrt::Windows::Graphics::Capture;
 namespace wgdx = winrt::Windows::Graphics::DirectX;
+namespace wgd3d = winrt::Windows::Graphics::DirectX::Direct3D11;
 
 static winrt::com_ptr<ID3D11Device> capture_device() {
         static winrt::com_ptr<ID3D11Device> dev;
@@ -82,6 +87,8 @@ struct Grabber::Impl {
         winrt::com_ptr<ID3D11Texture2D> staging;
         UINT w = 0;
         UINT h = 0;
+        INT poolW = 0;
+        INT poolH = 0;
 };
 
 Grabber::~Grabber() {
@@ -108,6 +115,8 @@ bool Grabber::start(void *handle) {
                 auto size = d->item.Size();
                 d->pool = Direct3D11CaptureFramePool::CreateFreeThreaded(d->d3d,
                         wgdx::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, size);
+                d->poolW = size.Width;
+                d->poolH = size.Height;
                 d->session = d->pool.CreateCaptureSession(d->item);
                 try {
                         d->session.IsCursorCaptureEnabled(false);
@@ -143,15 +152,16 @@ bool Grabber::pump() {
         }
         try {
                 auto cs = last.ContentSize();
-                auto ps = last.PoolSize();
-                if (ps.Width != cs.Width || ps.Height != cs.Height) {
+                if (d->poolW != cs.Width || d->poolH != cs.Height) {
                         d->pool.Recreate(d->d3d,
                                 wgdx::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, cs);
+                        d->poolW = cs.Width;
+                        d->poolH = cs.Height;
                         return false;
                 }
                 UINT w = UINT(cs.Width < 1 ? 1 : cs.Width);
                 UINT h = UINT(cs.Height < 1 ? 1 : cs.Height);
-                auto access = last.Surface().as<IDirect3DDxgiInterfaceAccess>();
+                auto access = last.Surface().as<wgd3d::IDirect3DDxgiInterfaceAccess>();
                 winrt::com_ptr<ID3D11Texture2D> tex;
                 winrt::check_hresult(access->GetInterface(__uuidof(ID3D11Texture2D),
                         tex.put_void()));

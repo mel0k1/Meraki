@@ -216,7 +216,7 @@ if(WIN32)
     qt_add_resources(swinewm "meraki_genie_shaders" PREFIX "/shaders" FILES
       ${GENIE_FRAG_QSB} ${GENIE_VERT_QSB})
     target_compile_definitions(swinewm PRIVATE MERAKI_QML)
-    set_property(TARGET swinewm PROPERTY CXX_STANDARD 17)
+    set_property(TARGET swinewm PROPERTY CXX_STANDARD 20)
     target_link_libraries(swinewm PRIVATE Qt6::Quick windowsapp)
   endif()
 
