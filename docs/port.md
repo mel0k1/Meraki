@@ -11,7 +11,13 @@
 
 - `swinewm/main.c` — запуск и остановка QML-слоя под `MERAKI_QML`
 - `swinewm/CMakeLists.txt` — опция `MERAKI_QML`, Qt Quick, ресурсы QML
-- `swinewm/config.in` — нативный бар скрыт (`bar mode invisible`)
+- `swinewm/config.in` — нативный бар скрыт (`bar mode invisible`); Meraki —
+  DE: `default_floating yes` (окна плавают, как в Mac), `default_border none`,
+  обои не навязываются (см. wallpaper.c)
+- `swinewm/tree/view.c` + `commands/settings.c` — `default_floating yes|no`:
+  новые окна добавляются на рабочий стол как плавающие и сохраняют позицию/
+  размер от приложения (поведение DE, а не оконника); тайлинг возвращается
+  `default_floating no`
 - `swinewm/qmlbar/` — сам слой (новое)
 - `swinewm/qmlbar/media.cpp` — `MerakiMedia`: системный медиа-контрол через
   `GlobalSystemMediaTransportControlsSessionManager` (C++/WinRT): трек,
@@ -21,13 +27,17 @@
   (обратный вызов об изменениях), `win32_tray_icon_bits` (копия иконки)
 - `swinewm/win32/wallpaper.c` — `win32_desktop_layer_register`/
   `win32_desktop_layer_place`: окно виджетов живёт прямо над обоями и не
-  мешает раскладке обоев/десктопа
+  мешает раскладке обоев/десктопа; без `output * bg` в конфиге движок
+  рисует текущие обои Windows пользователя (`SPI_GETDESKWALLPAPER`) — свои
+  обои Meraki не ставит
 - `swinewm/qmlbar/capture.cpp` — `Windows.Graphics.Capture` через C++/WinRT:
   `LiveThumb` (живое превью окна в QML) и `MerakiFx` (стоп-кадр окна,
   полноэкранный оверлей для genie, кэш кадров для восстановления)
 - `tools/switcher/` — переключатель оболочки: две кнопки — «Поставить Meraki»
   (движок сам прописывается в HKCU Winlogon Shell через `swinewm --set-shell`)
-  и «Вернуть Explorer» (`--unset-shell`), плюс статус оболочки и процессов
+  и «Вернуть Explorer» (`--unset-shell`); подтверждение действия, кнопка
+  активной оболочки неактивна, статус обновляется сам (таймер), безопасное
+  чтение реестра с терминатором
 
 ## Портировано из MacShell
 
@@ -50,7 +60,9 @@
   — `SWINE_IPC_CLOSE_NOTIFICATION`, клик по заметке — фокус приложения,
   тумблер — `toggleCenter` (клик по часам в баре)
 - `dock/Preview.qml` + `LiveThumb` — живое превью окна при наведении
-  (`Windows.Graphics.Capture`, кадры через staging-текстуру в QImage)
+  (`Windows.Graphics.Capture`, кадры через staging-текстуру в QImage);
+  для мультиокна — переключение стрелками ‹ › со счётчиком 1/N, клик по
+  превью — фокус окна, кнопка × — закрыть окна (`[con_id] kill`)
 - `dock/DockMenu.qml` — контекстное меню пина (правый клик по иконке):
   закрепить/открепить, закрыть все окна приложения; пины пишутся в
   `~/.swinewm/dock.json`, закреплённые без окон запускаются по клику
@@ -104,4 +116,5 @@ Hyprland- и Quickshell-зависимости оригинала заменен
 
 1. Мультидисплей: бар, док и виджеты на каждом экране
 2. Настройка виджетов (перетаскивание, размеры, список в widgets.json)
-3. Тег и GitHub Release с артефактами
+
+Тег и GitHub Release с артефактами сделаны (v0.3.0).
