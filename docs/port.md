@@ -13,6 +13,9 @@
 - `swinewm/CMakeLists.txt` — опция `MERAKI_QML`, Qt Quick, ресурсы QML
 - `swinewm/config.in` — нативный бар скрыт (`bar mode invisible`)
 - `swinewm/qmlbar/` — сам слой (новое)
+- `swinewm/qmlbar/capture.cpp` — `Windows.Graphics.Capture` через C++/WinRT:
+  `LiveThumb` (живое превью окна в QML) и `MerakiFx` (стоп-кадр окна,
+  полноэкранный оверлей для genie, кэш кадров для восстановления)
 
 ## Портировано из MacShell
 
@@ -30,19 +33,23 @@
   `SHGetFileInfo` + jumbo-лист с кэшем в `~/.swinewm/cache/icons`, обои
   через `SPI_GETDESKWALLPAPER`, пины в `~/.swinewm/dock.json`, регион ввода
   шагами 64 px
+- `dock/Preview.qml` + `LiveThumb` — живое превью окна при наведении
+  (`Windows.Graphics.Capture`, кадры через staging-текстуру в QImage)
+- `MinimizeFx.qml` + `shaders/genie.vert`/`genie.frag` — генси: стоп-кадр
+  окна, DWM-переход отключается, окно сворачивается, сетка 6x64 льёт кадр
+  в слот дока (bezье 0.22/0.8/0.28/1.0, 0.42 с); восстановление — обратная
+  деформация из кэша кадра, затем `SW_RESTORE` и фейд оверлея 180 мс
 
-Фон стекла — обои плюс прямоугольники окон из IPC-дерева (захват живых окон
-и UWP-иконки — следующий шаг); тултип — без хвоста и размытия фона
-(DockGlassPanel-стиль — следующий шаг).
+Фон стекла — обои плюс прямоугольники окон из IPC-дерева (UWP-иконки —
+следующий шаг); тултип — без хвоста и размытия фона (DockGlassPanel-стиль —
+следующий шаг).
 
 Hyprland- и Quickshell-зависимости оригинала заменены на sway-IPC через
 `bridge`; рантайм — чистый Qt Quick на Windows.
 
 ## Roadmap
 
-1. Живые миниатюры окон в доке (Windows.Graphics.Capture), генси-анимация,
-   контекстное меню пина
-2. Тултипы с размытым фоном (DockGlassPanel)
-3. Центр уведомлений на `SWINE_IPC_GET_NOTIFICATIONS`
-4. Виджеты рабочего стола (погода, календарь, музыка) из MacShell
-5. Трей и меню запуска в QML-баре, мультидисплей
+1. Контекстное меню пина, тултипы с размытым фоном (DockGlassPanel)
+2. Центр уведомлений на `SWINE_IPC_GET_NOTIFICATIONS`
+3. Виджеты рабочего стола (погода, календарь, музыка) из MacShell
+4. Трей и меню запуска в QML-баре, мультидисплей

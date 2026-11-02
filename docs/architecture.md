@@ -22,11 +22,21 @@ Qt Quick внутри процесса движка:
 
 - `qmlbar.cpp` — окно бара (frameless, поверх всех, прозрачный фон) и
   объект `bridge` для QML: свойства `workspaces`, `activeName`, команда
-  `switchTo(n)`;
+  `switchTo(n)`; `MerakiDock`: список окон из `IPC_GET_TREE` (id, hwnd,
+  iconic), иконки, пины
 - `bridge.c` — поток-подписчик IPC (`SUBSCRIBE ["workspace","window"]`),
   события кладёт в очередь, QML-поток забирает по таймеру;
+- `capture.cpp` — `Windows.Graphics.Capture`: `LiveThumb` (живое превью
+  окна, кадры GPU -> staging -> QImage) и `MerakiFx` (джинн: оверлей на весь
+  экран, стоп-кадр, `SW_MINIMIZE`/`SW_RESTORE` с отключённым DWM-переходом);
 - `qml/Meraki/*.qml` — интерфейс: бар, док с иконками и Liquid Glass
-  (`shaders/`, `glass/`, `dock/`), пилюли рабочих столов, часы.
+  (`shaders/`, `glass/`, `dock/`), живые превью (`dock/Preview.qml`),
+  генси (`MinimizeFx.qml`), пилюли рабочих столов, часы.
+
+Генси: клик по иконке сфокусированного окна -> стоп-кадр окна -> окно
+сворачивается -> вершинный шейдер `genie.vert` (сетка 6x64) льёт кадр в слот
+иконки за 0.42 с; клик по свернутому окну проигрывает то же назад из кэша
+кадра и возвращает окно под фейдящийся оверлей.
 
 ## Границы
 
