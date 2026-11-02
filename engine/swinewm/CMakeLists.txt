@@ -166,7 +166,8 @@ if(WIN32)
   target_compile_definitions(swinewm PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN
     WINVER=0x0A00 _WIN32_WINNT=0x0A00)
   target_link_libraries(swinewm PRIVATE swinewm_core user32 gdi32 dwmapi shell32
-    shcore advapi32 ole32 windowscodecs msimg32 uuid iphlpapi wlanapi pdh ws2_32 powrprof)
+    shcore advapi32 ole32 propsys windowscodecs msimg32 uuid iphlpapi wlanapi
+    pdh ws2_32 powrprof)
 
   if(MERAKI_QML)
     target_sources(swinewm PRIVATE

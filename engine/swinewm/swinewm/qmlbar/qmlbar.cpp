@@ -5,6 +5,11 @@
 #include <shellapi.h>
 #include <shlobj_core.h>
 #include <commoncontrols.h>
+#include <appmodel.h>
+#include <objbase.h>
+#include <propkey.h>
+#include <propsys.h>
+#include <shobjidl_core.h>
 
 #include <QDateTime>
 #include <QDir>
@@ -124,6 +129,152 @@ static QImage meraki_hicon_to_image(HICON icon) {
 
 static std::map<std::string, std::string> g_exe_paths;
 static std::map<std::string, QPixmap> g_icon_cache;
+static std::map<QString, QString> g_uwp_names;
+
+static void meraki_ensure_com() {
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+}
+
+static QString meraki_aumid_for_hwnd(HWND hwnd) {
+        static std::map<long long, QString> cache;
+        const long long key = (long long)(intptr_t)hwnd;
+        auto it = cache.find(key);
+        if (it != cache.end()) {
+                return it->second;
+        }
+        QString aumid;
+        IPropertyStore *store = nullptr;
+        if (SUCCEEDED(SHGetPropertyStoreForWindow(hwnd, IID_IPropertyStore,
+                (void **)&store)) && store) {
+                PROPVARIANT v;
+                PropVariantInit(&v);
+                if (SUCCEEDED(store->GetValue(PKEY_AppUserModel_ID, &v)) &&
+                        v.vt == VT_LPWSTR && v.pwszVal) {
+                        aumid = QString::fromWCharArray(v.pwszVal);
+                }
+                PropVariantClear(&v);
+                store->Release();
+        }
+        if (aumid.isEmpty()) {
+                HWND core = FindWindowExW(hwnd, nullptr,
+                        L"Windows.UI.Core.CoreWindow", nullptr);
+                DWORD pid = 0;
+                if (core && GetWindowThreadProcessId(core, &pid) && pid) {
+                        HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
+                                FALSE, pid);
+                        if (p) {
+                                UINT32 len = 0;
+                                if (GetApplicationUserModelId(p, &len, nullptr) ==
+                                        ERROR_INSUFFICIENT_BUFFER) {
+                                        std::wstring buf(len, L'\0');
+                                        if (GetApplicationUserModelId(p, &len,
+                                                buf.data()) == ERROR_SUCCESS) {
+                                                aumid = QString::fromWCharArray(
+                                                        buf.c_str());
+                                        }
+                                }
+                                CloseHandle(p);
+                        }
+                }
+        }
+        if (cache.size() > 256) {
+                cache.clear();
+        }
+        cache[key] = aumid;
+        return aumid;
+}
+
+static QString meraki_uwp_name(const QString &aumid) {
+        meraki_ensure_com();
+        IShellItem *item = nullptr;
+        const QString path = "shell:AppsFolder/" + aumid;
+        if (FAILED(SHCreateItemFromParsingName((LPCWSTR)path.utf16(), nullptr,
+                IID_PPV_ARGS(&item))) || !item) {
+                return QString();
+        }
+        PWSTR name = nullptr;
+        QString out;
+        if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &name)) && name) {
+                out = QString::fromWCharArray(name);
+                CoTaskMemFree(name);
+        }
+        item->Release();
+        return out;
+}
+
+static QImage meraki_hbitmap_to_image(HBITMAP bmp) {
+        BITMAP bm = {};
+        if (!bmp || !GetObjectW(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0) {
+                return QImage();
+        }
+        QImage img(bm.bmWidth, bm.bmHeight, QImage::Format_ARGB32);
+        BITMAPINFOHEADER bi = {};
+        bi.biSize = sizeof(bi);
+        bi.biWidth = bm.bmWidth;
+        bi.biHeight = -bm.bmHeight;
+        bi.biPlanes = 1;
+        bi.biBitCount = 32;
+        bi.biCompression = BI_RGB;
+        HDC dc = GetDC(nullptr);
+        int rows = GetDIBits(dc, bmp, 0, bm.bmHeight, img.bits(),
+                (BITMAPINFO *)&bi, DIB_RGB_COLORS);
+        ReleaseDC(nullptr, dc);
+        if (rows != bm.bmHeight) {
+                return QImage();
+        }
+        bool premul = true;
+        for (int y = 0; y < img.height() && premul; ++y) {
+                const QRgb *line = (const QRgb *)img.constScanLine(y);
+                for (int x = 0; x < img.width(); ++x) {
+                        int a = qAlpha(line[x]);
+                        if (qRed(line[x]) > a || qGreen(line[x]) > a ||
+                                qBlue(line[x]) > a) {
+                                premul = false;
+                                break;
+                        }
+                }
+        }
+        if (premul) {
+                for (int y = 0; y < img.height(); ++y) {
+                        QRgb *line = (QRgb *)img.scanLine(y);
+                        for (int x = 0; x < img.width(); ++x) {
+                                int a = qAlpha(line[x]);
+                                if (a == 0) {
+                                        line[x] = 0;
+                                } else if (a < 255) {
+                                        line[x] = qRgba(
+                                                qMin(255, qRed(line[x]) * 255 / a),
+                                                qMin(255, qGreen(line[x]) * 255 / a),
+                                                qMin(255, qBlue(line[x]) * 255 / a), a);
+                                }
+                        }
+                }
+        }
+        return img;
+}
+
+static QImage meraki_uwp_image(const QString &aumid) {
+        meraki_ensure_com();
+        IShellItem *item = nullptr;
+        const QString path = "shell:AppsFolder/" + aumid;
+        if (FAILED(SHCreateItemFromParsingName((LPCWSTR)path.utf16(), nullptr,
+                IID_PPV_ARGS(&item))) || !item) {
+                return QImage();
+        }
+        IShellItemImageFactory *factory = nullptr;
+        QImage out;
+        if (SUCCEEDED(item->QueryInterface(IID_PPV_ARGS(&factory))) && factory) {
+                HBITMAP bmp = nullptr;
+                SIZE sz = {96, 96};
+                if (SUCCEEDED(factory->GetImage(sz, SIIGBF_ICONONLY, &bmp)) && bmp) {
+                        out = meraki_hbitmap_to_image(bmp);
+                        DeleteObject(bmp);
+                }
+                factory->Release();
+        }
+        item->Release();
+        return out;
+}
 
 static QString meraki_exe_for(const QString &key) {
         std::string k = key.toLower().toStdString();
@@ -184,7 +335,8 @@ static QPixmap meraki_icon_for(const QString &key) {
                 pm = QPixmap(cachePath);
         }
         if (pm.isNull()) {
-                QImage img = meraki_extract_icon(meraki_exe_for(k));
+                QImage img = k.contains('!') ? meraki_uwp_image(k)
+                        : meraki_extract_icon(meraki_exe_for(k));
                 if (!img.isNull()) {
                         img.save(cachePath, "PNG");
                         pm = QPixmap::fromImage(img);
@@ -331,6 +483,11 @@ public:
                 runCommand("[con_id=" + std::to_string(id) + "] focus");
         }
 
+        Q_INVOKABLE QString appName(const QString &key) {
+                auto it = g_uwp_names.find(key);
+                return it != g_uwp_names.end() ? it->second : key;
+        }
+
         Q_INVOKABLE void launch(const QString &cmd) {
                 runCommand("exec " + cmd.toStdString());
         }
@@ -351,12 +508,25 @@ public:
                         }
                 }
                 QString exe = meraki_exe_for(key);
-                if (exe.isEmpty()) {
-                        exe = key;
-                }
-                QString name = QFileInfo(exe).completeBaseName();
-                if (name.isEmpty()) {
-                        name = key;
+                QString name;
+                if (key.contains('!')) {
+                        auto it = g_uwp_names.find(key);
+                        name = it != g_uwp_names.end() ? it->second
+                                : meraki_uwp_name(key);
+                        if (name.isEmpty()) {
+                                name = key.section('!', 0, 0);
+                        }
+                        if (exe.isEmpty()) {
+                                exe = "explorer.exe shell:AppsFolder/" + key;
+                        }
+                } else {
+                        if (exe.isEmpty()) {
+                                exe = key;
+                        }
+                        name = QFileInfo(exe).completeBaseName();
+                        if (name.isEmpty()) {
+                                name = key;
+                        }
                 }
                 QVariantMap pin;
                 pin.insert("key", key);
@@ -447,6 +617,21 @@ public slots:
                                                                 QString::fromWCharArray(path).toStdString();
                                                 }
                                                 CloseHandle(p);
+                                        }
+                                }
+                                if (hwnd > 0) {
+                                        const QString aumid =
+                                                meraki_aumid_for_hwnd(
+                                                        (HWND)(size_t)hwnd);
+                                        if (aumid.contains('!')) {
+                                                w.insert("appId", aumid);
+                                                if (!g_uwp_names.count(aumid)) {
+                                                        const QString name =
+                                                                meraki_uwp_name(aumid);
+                                                        g_uwp_names[aumid] =
+                                                                name.isEmpty()
+                                                                ? aumid : name;
+                                                }
                                         }
                                 }
                                 list.append(w);

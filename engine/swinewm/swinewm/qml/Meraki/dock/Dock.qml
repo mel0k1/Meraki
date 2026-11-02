@@ -67,7 +67,7 @@ Item {
             var wl = windowsFor(k)
             if (wl.length === 0) continue
             seen[k] = true
-            list.push({ key: k, name: k, cmd: "", wins: wl, pinned: false })
+            list.push({ key: k, name: bridge.appName(k), cmd: "", wins: wl, pinned: false })
         }
         items = list
     }
