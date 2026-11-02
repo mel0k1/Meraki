@@ -45,7 +45,10 @@
 
 #include <set>
 
+// C-заголовок движка: реализация в .c, поэтому линкуем без манглинга.
+extern "C" {
 #include "swinewm/sysinfo.h"
+}
 
 #include "capture.h"
 #include "media.h"
