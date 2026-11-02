@@ -609,6 +609,8 @@ public:
                 m_view->rootContext()->setContextProperty("bridge", this);
                 m_view->rootContext()->setContextProperty("viewX", g.x());
                 m_view->rootContext()->setContextProperty("viewY", g.y());
+                m_view->rootContext()->setContextProperty("viewW", g.width());
+                m_view->rootContext()->setContextProperty("viewH", g.height());
                 if (g_fx) {
                         m_view->rootContext()->setContextProperty("fx", g_fx);
                 }
@@ -870,6 +872,9 @@ public slots:
                 if (!m_view) {
                         return;
                 }
+                // Регионы Windows задаются в физических пикселях, а размеры
+                // Qt — в логических: на масштабах 125/150% без dpr всё съезжает.
+                const qreal dpr = m_view->devicePixelRatio();
                 int w = int(m_dockWidth) + 12;
                 if (w < 96) {
                         w = 96;
@@ -888,7 +893,9 @@ public slots:
                 m_lastH = h;
                 int x = (m_view->width() - w) / 2;
                 int y = m_view->height() - h;
-                HRGN rgn = CreateRoundRectRgn(x, y, x + w, m_view->height(), 20, 20);
+                HRGN rgn = CreateRoundRectRgn(int(x * dpr), int(y * dpr),
+                        int((x + w) * dpr), int(m_view->height() * dpr),
+                        int(20 * dpr), int(20 * dpr));
                 SetWindowRgn((HWND)m_view->winId(), rgn, FALSE);
         }
 
@@ -958,6 +965,7 @@ private:
                 QString path = meraki_home_dir() + "/.swinewm/dock.json";
                 QFile f(path);
                 bool loaded = false;
+                bool have_pins = false;
                 if (f.open(QIODevice::ReadOnly)) {
                         loaded = true;
                         const QJsonArray arr = QJsonDocument::fromJson(f.readAll()).array();
@@ -969,6 +977,7 @@ private:
                                 pin.insert("cmd", o.value("cmd").toString());
                                 if (!pin.value("key").toString().isEmpty()) {
                                         m_pins.append(pin);
+                                        have_pins = true;
                                 }
                                 const QString exe = o.value("cmd").toString();
                                 if (!exe.isEmpty()) {
@@ -981,7 +990,9 @@ private:
                                 }
                         }
                 }
-                if (!loaded) {
+                // Пустой файл не оставляет док навсегда пустой пилюлей:
+                // без пинов показываем стартовый набор.
+                if (!loaded || !have_pins) {
                         const char *defs[][2] = {
                                 {"explorer.exe", "Files"},
                                 {"msedge.exe", "Browser"},
@@ -1350,6 +1361,7 @@ private:
                 if (!m_view || !m_view->isVisible()) {
                         return;
                 }
+                const qreal dpr = m_view->devicePixelRatio();
                 const int y0 = std::max(0, (int)m_panelY);
                 const int y1 = std::min(m_view->height(),
                         (int)(m_panelY + m_panelH));
@@ -1358,8 +1370,9 @@ private:
                                 CreateRectRgn(0, 0, 0, 0), FALSE);
                         return;
                 }
-                SetWindowRgn((HWND)m_view->winId(), CreateRoundRectRgn(0, y0,
-                        m_view->width(), y1, 20, 20), FALSE);
+                SetWindowRgn((HWND)m_view->winId(), CreateRoundRectRgn(0,
+                        int(y0 * dpr), int(m_view->width() * dpr),
+                        int(y1 * dpr), int(20 * dpr), int(20 * dpr)), FALSE);
         }
 
         QQuickView *m_view = nullptr;
@@ -1709,11 +1722,17 @@ public slots:
                                 return;
                         }
                 }
+                // Экран регистрируется ДО setSource: QML зовёт setCards()
+                // из Component.onCompleted, и если индекса ещё нет, карточки
+                // отбрасываются, а регион окна остаётся пустым — виджеты
+                // полностью невидимы.
                 Screen s;
                 s.x = g.x();
                 s.y = g.y();
                 s.w = g.width();
                 s.h = g.height();
+                m_screens.append(s);
+                const int index = m_screens.size() - 1;
                 s.view = new QQuickView();
                 s.view->setFlags(Qt::FramelessWindowHint | Qt::Tool |
                         Qt::NoDropShadowWindowHint);
@@ -1725,16 +1744,16 @@ public slots:
                 s.view->rootContext()->setContextProperty("viewY", s.y);
                 s.view->rootContext()->setContextProperty("viewW", s.w);
                 s.view->rootContext()->setContextProperty("viewH", s.h);
-                s.view->rootContext()->setContextProperty("viewIndex",
-                        m_screens.size());
+                s.view->rootContext()->setContextProperty("viewIndex", index);
                 s.view->setSource(QUrl(QStringLiteral(
                         "qrc:/qml/Meraki/widgets/Widgets.qml")));
                 s.view->setGeometry(g);
                 s.view->show();
                 s.hwnd = (HWND)s.view->winId();
+                m_screens[index].view = s.view;
+                m_screens[index].hwnd = s.hwnd;
                 win32_desktop_layer_register(s.hwnd);
                 win32_desktop_layer_place(s.hwnd);
-                m_screens.append(s);
         }
 
         void removeScreen(QScreen *screen) {
@@ -1771,18 +1790,20 @@ public slots:
                         if (!s.view) {
                                 continue;
                         }
+                        // Регионы Windows — в физических пикселях (см. док).
+                        const qreal dpr = s.view->devicePixelRatio();
                         HRGN rgn = CreateRectRgn(0, 0, 0, 0);
                         for (const QVariant &v : s.cards) {
                                 const QVariantMap c = v.toMap();
-                                const int x = c.value("x").toInt();
-                                const int y = c.value("y").toInt();
-                                const int w = c.value("w").toInt();
-                                const int h = c.value("h").toInt();
+                                const int x = int(c.value("x").toInt() * dpr);
+                                const int y = int(c.value("y").toInt() * dpr);
+                                const int w = int(c.value("w").toInt() * dpr);
+                                const int h = int(c.value("h").toInt() * dpr);
                                 if (w <= 0 || h <= 0) {
                                         continue;
                                 }
                                 HRGN r = CreateRoundRectRgn(x, y, x + w, y + h,
-                                        30, 30);
+                                        int(30 * dpr), int(30 * dpr));
                                 CombineRgn(rgn, rgn, r, RGN_OR);
                                 DeleteObject(r);
                         }
@@ -1935,11 +1956,6 @@ public:
         }
 
         void show() {
-                QSurfaceFormat format = QSurfaceFormat::defaultFormat();
-                format.setAlphaBufferSize(8);
-                QSurfaceFormat::setDefaultFormat(format);
-                QQuickView::setDefaultAlphaBuffer(true);
-
                 const QList<QScreen *> screens = QGuiApplication::screens();
                 for (QScreen *screen : screens) {
                         addScreen(screen);
@@ -1973,7 +1989,7 @@ public slots:
                         "qrc:/qml/Meraki/Main.qml")));
                 const QRect geometry = screen->geometry();
                 view->setGeometry(geometry.x(), geometry.y(),
-                        geometry.width(), 36);
+                        geometry.width(), 28);
                 view->show();
                 m_screens.append(screen);
                 m_views.append(view);
@@ -2187,6 +2203,12 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
         (void)arg;
         int argc = 0;
         char *argv[] = {nullptr};
+        // Alpha-буфер нужен всем окнам с самого первого: прозрачность
+        // задаётся на момент создания окна, поздние изменения не действуют.
+        QSurfaceFormat format = QSurfaceFormat::defaultFormat();
+        format.setAlphaBufferSize(8);
+        QSurfaceFormat::setDefaultFormat(format);
+        QQuickView::setDefaultAlphaBuffer(true);
         QGuiApplication app(argc, argv);
         g_app = &app;
         qmlRegisterType<LiveThumb>("Meraki", 1, 0, "LiveThumb");

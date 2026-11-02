@@ -1,9 +1,12 @@
 import QtQuick
 
+// Часы в стиле MacBar: дата приглушённым цветом, время полужирное,
+// пилюля при наведении, красная точка — счётчик уведомлений.
 Item {
     id: clock
-    width: row.width + 20
-    height: 24
+
+    width: row.width + 18
+    height: 22
 
     property string timeText: Qt.formatDateTime(new Date(), "HH:mm")
     property string dateText: Qt.formatDateTime(new Date(), "d MMM")
@@ -22,29 +25,31 @@ Item {
     }
 
     Rectangle {
-        anchors.fill: parent
-        radius: 12
+        anchors.centerIn: parent
+        width: parent.width - 2
+        height: parent.height - 4
+        radius: 6
         color: ma.containsMouse || clock.open
-            ? Qt.rgba(1, 1, 1, 0.12) : "transparent"
+            ? Qt.rgba(1, 1, 1, 0.14) : "transparent"
         Behavior on color { ColorAnimation { duration: 120 } }
     }
 
     Row {
         id: row
         anchors.centerIn: parent
-        spacing: 8
+        spacing: 6
 
         Text {
+            anchors.verticalCenter: parent.verticalCenter
             text: clock.dateText
-            color: "#99FFFFFF"
-            font.family: "SF Pro Display"
-            font.pixelSize: 13
+            color: "#B3FFFFFF"
+            font.pixelSize: 12
         }
 
         Text {
+            anchors.verticalCenter: parent.verticalCenter
             text: clock.timeText
             color: "#F2FFFFFF"
-            font.family: "SF Pro Display"
             font.pixelSize: 13
             font.weight: Font.DemiBold
         }

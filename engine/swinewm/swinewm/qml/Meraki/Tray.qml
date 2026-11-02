@@ -1,12 +1,14 @@
 import QtQuick
 import QtQuick.Window
 
+// Трей в стиле MacBar: иконки 16px по центру ячеек 26×28, при наведении
+// пилюля, как у остальных элементов ленты.
 Row {
     id: row
 
-    readonly property int iconPx: 17
+    readonly property int iconPx: 16
 
-    spacing: 12
+    spacing: 0
 
     function screenPt(item, mx, my) {
         var p = item.mapToItem(null, mx, my)
@@ -35,8 +37,18 @@ Row {
 
             required property var modelData
 
-            width: row.iconPx + 6
-            height: row.iconPx + 6
+            width: 26
+            height: 28
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: parent.width - 2
+                height: parent.height - 6
+                radius: 6
+                color: ma.containsMouse
+                    ? Qt.rgba(1, 1, 1, 0.14) : "transparent"
+                Behavior on color { ColorAnimation { duration: 120 } }
+            }
 
             Image {
                 anchors.centerIn: parent

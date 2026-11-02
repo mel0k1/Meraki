@@ -1,36 +1,50 @@
 import QtQuick
 
+// Воркспейсы в стиле MacBar: минимализм, только номера; текущий —
+// полупрозрачная пилюля и полужирный текст.
 Row {
     id: row
-    spacing: 6
+
+    height: 28
 
     Repeater {
         model: bridge.workspaces
 
-        Rectangle {
-            id: pill
+        Item {
+            id: ws
+
             required property var modelData
-            radius: 9
-            height: 22
-            width: label.implicitWidth + 18
-            color: modelData.focused ? "#66FFFFFF" : (modelData.urgent ? "#66FF5A52" : "#22FFFFFF")
-            border.color: modelData.focused ? "#66FFFFFF" : "#1FFFFFFF"
-            border.width: 1
+
+            width: 22
+            height: 28
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: parent.width - 2
+                height: parent.height - 6
+                radius: 6
+                color: Qt.rgba(1, 1, 1, 0.16)
+                opacity: ws.modelData.focused || wsMa.containsMouse ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 140 } }
+            }
 
             Text {
-                id: label
                 anchors.centerIn: parent
-                text: pill.modelData.name
-                color: pill.modelData.focused ? "#FF101014" : "#D8FFFFFF"
-                font.family: "SF Pro Display"
-                font.pixelSize: 12
-                font.weight: pill.modelData.focused ? Font.Bold : Font.Medium
+                text: ws.modelData.num
+                color: ws.modelData.focused ? "#F2FFFFFF"
+                    : (ws.modelData.urgent ? "#FFFF8B7E" : "#99FFFFFF")
+                font.pixelSize: 13
+                font.weight: ws.modelData.focused ? Font.DemiBold : Font.Normal
+                Behavior on color { ColorAnimation { duration: 140 } }
             }
 
             MouseArea {
+                id: wsMa
+
                 anchors.fill: parent
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: bridge.switchTo(pill.modelData.num)
+                onClicked: bridge.switchTo(ws.modelData.num)
             }
         }
     }

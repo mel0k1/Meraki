@@ -28,13 +28,22 @@ Item {
         return -1
     }
 
-    width: viewW
     height: Math.ceil(margin + bgHeight + headroom)
 
+    // Корень масштабирует сам QQuickView (SizeRootObjectToView), так что
+    // ширину не задаём: она всегда равна ширине окна.
     Component.onCompleted: {
         bridge.dockRestHeight = margin + bgHeight
         rebuild()
         Qt.callLater(syncWidth)
+    }
+
+    // Без этих связок док один раз строится на старте и навсегда
+    // застывает пустым: окна движка приходят позже.
+    Connections {
+        target: bridge
+        function onWindowsChanged() { root.rebuild() }
+        function onPinsChanged() { root.rebuild() }
     }
 
     function syncWidth() {
@@ -56,8 +65,9 @@ Item {
     function windowsFor(key) {
         var out = []
         var ws = bridge.windows
+        var k = key.toLowerCase()
         for (var i = 0; i < ws.length; i++)
-            if (ws[i].appId === key) out.push(ws[i])
+            if (ws[i].appId.toLowerCase() === k) out.push(ws[i])
         return out
     }
 
@@ -68,16 +78,16 @@ Item {
         for (var i = 0; i < pins.length; i++) {
             var p = pins[i]
             var wins = windowsFor(p.key)
-            seen[p.key] = true
+            seen[p.key.toLowerCase()] = true
             list.push({ key: p.key, name: p.name, cmd: p.cmd, wins: wins, pinned: true })
         }
         var ws2 = bridge.windows
         for (var j = 0; j < ws2.length; j++) {
             var k = ws2[j].appId
-            if (seen[k]) continue
+            if (seen[k.toLowerCase()]) continue
             var wl = windowsFor(k)
             if (wl.length === 0) continue
-            seen[k] = true
+            seen[k.toLowerCase()] = true
             list.push({ key: k, name: bridge.appName(k), cmd: "", wins: wl, pinned: false })
         }
         items = list
@@ -115,10 +125,7 @@ Item {
 
     Item {
         id: backdrop
-        x: 0
-        y: -(viewH - root.height)
-        width: viewW
-        height: viewH
+        anchors.fill: parent
 
         Image {
             anchors.fill: parent
