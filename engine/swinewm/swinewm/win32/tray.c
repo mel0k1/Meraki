@@ -685,13 +685,13 @@ bool win32_tray_icon_bits(uint64_t id, int size, int *w, int *h,
                 HGDIOBJ old = SelectObject(mdc, bmp);
                 EnterCriticalSection(&lock);
                 struct tray_icon *icon = find_by_id(id);
-                HICON h = icon && icon->icon ? icon->icon
+                HICON hicon = icon && icon->icon ? icon->icon
                         : LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
-                if (h) {
-                        DrawIconEx(mdc, 0, 0, h, size, size, 0, NULL, DI_NORMAL);
+                if (hicon) {
+                        DrawIconEx(mdc, 0, 0, hicon, size, size, 0, NULL, DI_NORMAL);
                 }
                 LeaveCriticalSection(&lock);
-                if (h) {
+                if (hicon) {
                         unsigned char *buf = malloc((size_t)size * size * 4);
                         if (buf) {
                                 memcpy(buf, bits, (size_t)size * size * 4);
