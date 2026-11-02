@@ -137,6 +137,7 @@ struct swine_config {
 	bool floating_mod_inverse;   // move with the right button, resize left
 	bool tiling_drag;
 	int tiling_drag_threshold;
+	bool default_floating;       // swinewm extension: new windows float
 
 	// Decorations
 	enum swine_container_border border;            // default_border

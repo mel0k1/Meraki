@@ -68,6 +68,7 @@ struct swine_config *config_create(void) {
 	c->mouse_warping = WARP_OUTPUT;
 	c->tiling_drag = true;
 	c->tiling_drag_threshold = 9;
+	c->default_floating = true;
 
 	// Decorations: sway's defaults (config.c, do_config_defaults)
 	c->border = B_NORMAL;

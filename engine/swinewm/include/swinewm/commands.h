@@ -107,6 +107,7 @@ swine_cmd cmd_focus_follows_mouse;
 swine_cmd cmd_mouse_warping;
 swine_cmd cmd_tiling_drag;
 swine_cmd cmd_tiling_drag_threshold;
+swine_cmd cmd_default_floating;
 swine_cmd cmd_focus_wrapping;
 swine_cmd cmd_fullscreen;
 swine_cmd cmd_gaps;

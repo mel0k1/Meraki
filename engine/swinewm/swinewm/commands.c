@@ -95,6 +95,7 @@ static const struct cmd_handler handlers[] = {
 	{ "swap", cmd_swap, CMD_RUNTIME_ONLY },
 	{ "swaybg_command", cmd_ignored, CMD_CONFIG_ONLY },
 	{ "swaynag_command", cmd_ignored, CMD_CONFIG_ONLY },
+	{ "default_floating", cmd_default_floating, 0 },
 	{ "tiling_drag", cmd_tiling_drag, 0 },
 	{ "tiling_drag_threshold", cmd_tiling_drag_threshold, 0 },
 	{ "title_align", cmd_title_align, 0 },

@@ -190,7 +190,7 @@ void view_map(struct swine_view *view) {
 	struct swine_container *con = container_create(view);
 	struct swine_workspace *ws = select_workspace(view);
 
-	if (view->natural_floating) {
+	if (view->natural_floating || config->default_floating) {
 		con->border = config->floating_border;
 		con->border_thickness = config->floating_border_thickness;
 		workspace_add_floating(ws, con);

@@ -38,9 +38,10 @@ set $menu swinemenu
 
 ### Output configuration
 #
-# Default wallpaper. %SWINEWM_DATA% is the directory of swinewm.exe;
-# relative paths are relative to this config file.
-output * bg %SWINEWM_DATA%\wallpapers\swinewm-default.png fill
+# Meraki keeps the wallpaper you already chose in Windows; it does not
+# set one of its own. To force a specific image, uncomment:
+#
+#   output * bg C:\\path\\to\\image.jpg fill
 #
 # Example configuration (resolution, position and rotation change the
 # Windows display settings while swinewm runs; scale is set in Windows'
@@ -50,6 +51,17 @@ output * bg %SWINEWM_DATA%\wallpapers\swinewm-default.png fill
 #
 # You can get the names of your outputs by running: swinemsg -t get_outputs
 # ("name", or the monitor model in "model").
+
+### Desktop behaviour
+#
+# Meraki is a desktop environment in the Mac style: windows float, keep
+# the position and size the app gave them and never tile. Set "no" to get
+# SwineWM's tiling back.
+default_floating yes
+#
+# Windows draw their own frames and title bars; no extra borders.
+default_border none
+default_floating_border none
 
 ### Key bindings
 #

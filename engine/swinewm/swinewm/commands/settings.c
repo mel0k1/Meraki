@@ -104,6 +104,15 @@ struct cmd_results *cmd_tiling_drag(int argc, char **argv) {
 	return cmd_results_new(CMD_SUCCESS, NULL);
 }
 
+struct cmd_results *cmd_default_floating(int argc, char **argv) {
+	struct cmd_results *error = NULL;
+	if ((error = checkarg(argc, "default_floating", EXPECTED_EQUAL_TO, 1))) {
+		return error;
+	}
+	config->default_floating = parse_boolean(argv[0], config->default_floating);
+	return cmd_results_new(CMD_SUCCESS, NULL);
+}
+
 struct cmd_results *cmd_tiling_drag_threshold(int argc, char **argv) {
 	struct cmd_results *error = NULL;
 	if ((error = checkarg(argc, "tiling_drag_threshold", EXPECTED_EQUAL_TO, 1))) {
