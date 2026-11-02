@@ -256,6 +256,26 @@ static void test_natural_floating(void) {
 	fake_teardown();
 }
 
+static void test_default_floating(void) {
+	fake_setup();
+	config->default_floating = true;
+	struct swine_view *a = fake_map_view("a");
+	struct swine_workspace *ws = focused_ws();
+	CHECK_INT(ws->tiling->length, 0);
+	CHECK_INT(ws->floating->length, 1);
+	CHECK(container_is_floating(a->container));
+	CHECK_INT(a->pending.box.width, 640);
+	CHECK_INT(a->pending.box.height, 480);
+	CHECK_INT(a->pending.box.x, 180);
+	CHECK_INT(a->pending.box.y, 160);
+	CHECK(run("default_floating no"));
+	struct swine_view *b = fake_map_view("b");
+	CHECK_INT(ws->tiling->length, 1);
+	CHECK_INT(b->pending.box.width, 1000);
+	CHECK(!container_is_floating(b->container));
+	fake_teardown();
+}
+
 static void test_scratchpad(void) {
 	fake_setup();
 	struct swine_view *a = fake_map_view("a");
@@ -415,6 +435,7 @@ void test_tree_all(void) {
 	test_close_focus();
 	test_floating_fullscreen();
 	test_natural_floating();
+	test_default_floating();
 	test_scratchpad();
 	test_two_outputs();
 	test_resize();

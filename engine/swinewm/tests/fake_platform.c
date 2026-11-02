@@ -385,6 +385,7 @@ static void setup_common(void) {
 	cursor_reset();
 	server_init();
 	config = config_create();
+	config->default_floating = false;
 	config->active = true;
 }
 
