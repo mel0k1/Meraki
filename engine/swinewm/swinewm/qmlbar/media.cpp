@@ -4,7 +4,9 @@
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Media.Control.h>
+#include <winrt/Windows.Storage.Streams.h>
 
 #include <mutex>
 #include <utility>
@@ -31,7 +33,7 @@ struct MerakiMedia::Impl {
         }
 
         void readProperties(MerakiMedia *m) {
-                wmcs::GlobalSystemMediaTransportControlsSession s;
+                wmcs::GlobalSystemMediaTransportControlsSession s{nullptr};
                 {
                         std::lock_guard<std::mutex> guard(lock);
                         s = session;
@@ -41,7 +43,7 @@ struct MerakiMedia::Impl {
                 }
                 try {
                         auto props = s.TryGetMediaPropertiesAsync().get();
-                        auto info = s.PlaybackInfo();
+                        auto info = s.GetPlaybackInfo();
                         std::lock_guard<std::mutex> guard(lock);
                         has = true;
                         title = QString::fromWCharArray(props.Title().c_str());
@@ -201,10 +203,7 @@ void MerakiMedia::togglePlay() {
                 return;
         }
         try {
-                const auto target = playing()
-                        ? wmcs::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Paused
-                        : wmcs::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
-                s.TryChangePlaybackStatusAsync(target);
+                s.TryTogglePlayPauseAsync();
         } catch (...) {
         }
 }

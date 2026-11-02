@@ -439,7 +439,7 @@ public:
         }
 
 private:
-        std::map<std::string, QPixmap> m_cache;
+        std::map<QString, QPixmap> m_cache;
 };
 
 static QMutex g_tray_mutex;
