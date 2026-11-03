@@ -3003,7 +3003,8 @@ public:
         Q_INVOKABLE void openSettings(const QString &page) {
                 setOpen(false);
                 const std::wstring uri =
-                        (L"ms-settings:" + page).toStdWString();
+                        (QStringLiteral("ms-settings:") + page)
+                                .toStdWString();
                 SHELLEXECUTEINFOW info = {};
                 info.cbSize = sizeof(info);
                 info.lpFile = uri.c_str();
