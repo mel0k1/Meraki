@@ -16,6 +16,7 @@
 #define DWMWA_CLOAKED 14
 #endif
 
+#include <QClipboard>
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
@@ -24,6 +25,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
+#include <QJSEngine>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -35,6 +37,7 @@
 #include <QQuickImageProvider>
 #include <QQuickView>
 #include <QRect>
+#include <QRegularExpression>
 #include <QRunnable>
 #include <QScreen>
 #include <QSurfaceFormat>
@@ -43,6 +46,7 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include <atomic>
 #include <set>
 
 // C-заголовок движка: реализация в .c, поэтому линкуем без манглинга.
@@ -108,6 +112,44 @@ static QString meraki_cache_dir() {
         QString dir = meraki_home_dir() + "/.swinewm/cache/icons";
         QDir().mkpath(dir);
         return dir;
+}
+
+// Общие настройки оболочки: ~/.swinewm/settings.json (DND, smart-hide, ...).
+static QVariantMap meraki_settings_load() {
+        QFile f(meraki_home_dir() + "/.swinewm/settings.json");
+        if (!f.open(QIODevice::ReadOnly)) {
+                return {};
+        }
+        return QJsonDocument::fromJson(f.readAll()).object().toVariantMap();
+}
+
+static void meraki_settings_save(const QVariantMap &s) {
+        const QString path = meraki_home_dir() + "/.swinewm/settings.json";
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                f.write(QJsonDocument(QJsonObject::fromVariantMap(s)).toJson());
+        }
+}
+
+// Резерв дока в рабочей области движка: поток раскладки swinewm читает
+// его из своего потока (см. win32_shell_reserve). При smart-hide док
+// прячется и резерв схлопывается до узкой полосы у кромки.
+static std::atomic_int g_dock_reserve{76};
+
+extern "C" int meraki_dock_reserve_px(void) {
+        return g_dock_reserve.load();
+}
+
+// Движок живёт в другом потоке того же процесса: пересчитать рабочую
+// область можно только через его окно-сообщения (win32.h).
+extern "C" HWND win32_shell_hwnd;
+#ifndef WM_SWINE_DISPLAY_REFRESH
+#define WM_SWINE_DISPLAY_REFRESH (WM_APP + 7)
+#endif
+
+static void meraki_refresh_work_area() {
+        PostMessageW(win32_shell_hwnd, WM_SWINE_DISPLAY_REFRESH, 0, 0);
 }
 
 static QImage meraki_hicon_to_image(HICON icon) {
@@ -654,11 +696,16 @@ class MerakiDock : public QObject {
         Q_PROPERTY(bool dockHovered MEMBER m_dockHovered)
         Q_PROPERTY(qreal dockRestHeight MEMBER m_restHeight)
         Q_PROPERTY(bool trashFull READ trashFull NOTIFY trashChanged)
+        Q_PROPERTY(bool dockHidden READ dockHidden NOTIFY dockHiddenChanged)
 
 public:
         explicit MerakiDock(QObject *parent = nullptr) : QObject(parent) {
                 loadPins();
                 m_pinStamp = pinStamp();
+                const QVariantMap dockS = meraki_settings_load()
+                        .value("dock").toMap();
+                m_smartHide = dockS.contains("smartHide")
+                        ? dockS.value("smartHide").toBool() : true;
                 m_regionTimer = new QTimer(this);
                 m_regionTimer->setInterval(120);
                 connect(m_regionTimer, &QTimer::timeout, this, &MerakiDock::updateRegion);
@@ -821,6 +868,28 @@ public:
                 emit pinsChanged();
         }
 
+        // Drag-реордер пинов: key переносится на позицию index среди пинов.
+        Q_INVOKABLE void reorderPin(const QString &key, int index) {
+                const QString lower = key.toLower();
+                int from = -1;
+                for (int i = 0; i < m_pins.size(); ++i) {
+                        if (m_pins.at(i).toMap().value("key").toString()
+                                .toLower() == lower) {
+                                from = i;
+                                break;
+                        }
+                }
+                if (from < 0) {
+                        return;
+                }
+                const QVariantMap pin = m_pins.at(from).toMap();
+                m_pins.removeAt(from);
+                index = std::max(0, std::min(index, int(m_pins.size())));
+                m_pins.insert(index, pin);
+                savePins();
+                emit pinsChanged();
+        }
+
         Q_INVOKABLE void closeApp(const QString &key) {
                 const QString lower = key.toLower();
                 for (const QVariant &v : m_windows) {
@@ -881,6 +950,64 @@ public:
 
         bool trashFull() const {
                 return m_trashFull;
+        }
+
+        bool dockHidden() const {
+                return m_dockHidden;
+        }
+
+        // Smart-hide (macOS): док уезжает вниз, когда окно налегает на его
+        // полосу, и выезжает при курсоре у нижней кромки или ховере.
+        void updateSmartHide() {
+                bool show = m_dockHovered
+                        || (m_menuView && m_menuView->isVisible())
+                        || !m_launching.isEmpty();
+                if (!show) {
+                        POINT pt = {};
+                        if (GetCursorPos(&pt)) {
+                                show = pt.y >= m_screenY + m_screenHeight - 4
+                                        && pt.x >= m_screenX
+                                        && pt.x < m_screenX + m_screenWidth;
+                        }
+                }
+                if (!show) {
+                        bool overlap = false;
+                        const int stripTop = m_screenY + m_screenHeight
+                                - int(m_restHeight) - 8;
+                        for (const QVariant &v : m_windows) {
+                                const QVariantMap w = v.toMap();
+                                if (w.value("iconic").toBool()) {
+                                        continue;
+                                }
+                                const int wx = w.value("x").toInt();
+                                const int wy = w.value("y").toInt();
+                                const int ww = w.value("w").toInt();
+                                const int wh = w.value("h").toInt();
+                                if (ww <= 0 || wh <= 0) {
+                                        continue;
+                                }
+                                if (wy + wh > stripTop
+                                        && wx < m_screenX + m_screenWidth
+                                        && wx + ww > m_screenX) {
+                                        overlap = true;
+                                        break;
+                                }
+                        }
+                        show = !overlap;
+                }
+                setDockHidden(!show);
+        }
+
+        void setDockHidden(bool hidden) {
+                if (m_dockHidden == hidden) {
+                        return;
+                }
+                m_dockHidden = hidden;
+                // Резерв рабочей области: скрытый док оставляет узкую полосу
+                // у кромки, из которой курсор вызывает его обратно.
+                g_dock_reserve.store(hidden ? 8 : 76);
+                meraki_refresh_work_area();
+                emit dockHiddenChanged();
         }
 
         Q_INVOKABLE void openTrash() {
@@ -1147,6 +1274,17 @@ public slots:
                 if (!m_view) {
                         return;
                 }
+                if (m_smartHide) {
+                        updateSmartHide();
+                }
+                // Скрытый док: регион пуст — клики проходят сквозь окно,
+                // выезд — по курсору у кромки (см. updateSmartHide).
+                if (m_dockHidden) {
+                        SetWindowRgn((HWND)m_view->winId(),
+                                CreateRectRgn(0, 0, 0, 0), FALSE);
+                        m_lastW = -1;
+                        return;
+                }
                 // Регионы Windows задаются в физических пикселях, а размеры
                 // Qt — в логических: на масштабах 125/150% без dpr всё съезжает.
                 const qreal dpr = m_view->devicePixelRatio();
@@ -1179,6 +1317,7 @@ signals:
         void launchingChanged();
         void pinsChanged();
         void trashChanged();
+        void dockHiddenChanged();
 
 private:
         static void runCommand(const std::string &cmd) {
@@ -1323,6 +1462,8 @@ private:
         qreal m_dockWidth = 0;
         qreal m_restHeight = 80;
         bool m_dockHovered = false;
+        bool m_smartHide = true;
+        bool m_dockHidden = false;
         QString m_focusedKey;
         QString m_focusedTitle;
         qint64 m_focusedHwnd = 0;
@@ -1380,6 +1521,7 @@ class MerakiCenter : public QObject {
         Q_PROPERTY(qreal panelY MEMBER m_panelY)
         Q_PROPERTY(qreal panelH MEMBER m_panelH)
         Q_PROPERTY(QVariantList toasts READ toasts NOTIFY toastsChanged)
+        Q_PROPERTY(bool dnd READ dnd NOTIFY dndChanged)
 
 public:
         explicit MerakiCenter(QObject *parent = nullptr) : QObject(parent) {
@@ -1397,6 +1539,7 @@ public:
                         m_screenHeight = g.height();
                 }
                 m_wallpaper = meraki_wallpaper_url();
+                m_dnd = meraki_settings_load().value("dnd").toBool();
                 m_view = new QQuickView();
                 m_view->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
                         Qt::Tool | Qt::NoDropShadowWindowHint);
@@ -1456,6 +1599,26 @@ public:
 
         QVariantList windows() const {
                 return m_windows;
+        }
+
+        bool dnd() const {
+                return m_dnd;
+        }
+
+        // «Не беспокоить»: центр копит уведомления, но тосты не всплывают.
+        Q_INVOKABLE void toggleDnd() {
+                setDnd(!m_dnd);
+        }
+
+        Q_INVOKABLE void setDnd(bool on) {
+                if (m_dnd == on) {
+                        return;
+                }
+                m_dnd = on;
+                QVariantMap s = meraki_settings_load();
+                s.insert("dnd", on);
+                meraki_settings_save(s);
+                emit dndChanged();
         }
 
         Q_INVOKABLE void toggle() {
@@ -1615,8 +1778,12 @@ public slots:
                         for (const QVariant &nv : list) {
                                 const QVariantMap n = nv.toMap();
                                 if (n.value("id").toLongLong() == id) {
-                                        m_toasts.prepend(nv);
-                                        toastsDirty = true;
+                                        // DND: уведомление попадает только
+                                        // в центр, тост не всплывает.
+                                        if (!m_dnd) {
+                                                m_toasts.prepend(nv);
+                                                toastsDirty = true;
+                                        }
                                         break;
                                 }
                         }
@@ -1652,6 +1819,7 @@ signals:
         void openChanged();
         void toastsChanged();
         void windowsChanged();
+        void dndChanged();
 
 private:
         static void runCommand(const std::string &cmd) {
@@ -1855,6 +2023,7 @@ private:
         QVariantList m_toasts;
         std::set<qlonglong> m_knownActive;
         bool m_toastPrimed = false;
+        bool m_dnd = false;
         QVariantList m_windows;
         QVariantList m_activeIds;
         std::map<uint32_t, qint64> m_seen;
@@ -1867,6 +2036,56 @@ private:
 };
 
 static MerakiCenter *g_center = nullptr;
+
+// Общий скан меню «Пуск» для Launchpad и Spotlight: список приложений
+// (имя, путь, ключ иконки). seq — счётчик безопасных ключей иконок.
+static QVariantList meraki_scan_apps(int &seq) {
+        const QString dirs[] = { meraki_known_dir(FOLDERID_Programs),
+                meraki_known_dir(FOLDERID_CommonPrograms) };
+        QVariantList list;
+        std::map<QString, bool> seen;
+        for (const QString &dir : dirs) {
+                if (dir.isEmpty()) {
+                        continue;
+                }
+                QDirIterator it(dir, {"*.lnk", "*.url"}, QDir::Files,
+                        QDirIterator::Subdirectories);
+                while (it.hasNext()) {
+                        const QString path = it.next();
+                        const QString name =
+                                QFileInfo(path).completeBaseName();
+                        const QString key = name.toLower();
+                        if (name.isEmpty() || seen.count(key) ||
+                                path.contains("/startup/",
+                                        Qt::CaseInsensitive) ||
+                                path.contains(QString::fromUtf8(
+                                        "/автозагрузка/"),
+                                        Qt::CaseInsensitive)) {
+                                continue;
+                        }
+                        seen[key] = true;
+                        const QString safe =
+                                "a" + QString::number(seq++);
+                        {
+                                QMutexLocker lock(&g_appicon_mutex);
+                                g_appicon_paths[safe] = path;
+                        }
+                        QVariantMap app;
+                        app.insert("name", name);
+                        app.insert("path", path);
+                        app.insert("icon", safe);
+                        list.append(app);
+                }
+        }
+        std::sort(list.begin(), list.end(),
+                [](const QVariant &a, const QVariant &b) {
+                        return a.toMap().value("name").toString()
+                                .compare(b.toMap().value("name")
+                                        .toString(),
+                                        Qt::CaseInsensitive) < 0;
+                });
+        return list;
+}
 
 class MerakiApps : public QObject {
         Q_OBJECT
@@ -2012,51 +2231,7 @@ private:
         }
 
         QVariantList scanList() {
-                const QString dirs[] = { meraki_known_dir(FOLDERID_Programs),
-                        meraki_known_dir(FOLDERID_CommonPrograms) };
-                QVariantList list;
-                std::map<QString, bool> seen;
-                for (const QString &dir : dirs) {
-                        if (dir.isEmpty()) {
-                                continue;
-                        }
-                        QDirIterator it(dir, {"*.lnk", "*.url"}, QDir::Files,
-                                QDirIterator::Subdirectories);
-                        while (it.hasNext()) {
-                                const QString path = it.next();
-                                const QString name =
-                                        QFileInfo(path).completeBaseName();
-                                const QString key = name.toLower();
-                                if (name.isEmpty() || seen.count(key) ||
-                                        path.contains("/startup/",
-                                                Qt::CaseInsensitive) ||
-                                        path.contains(QString::fromUtf8(
-                                                "/автозагрузка/"),
-                                                Qt::CaseInsensitive)) {
-                                        continue;
-                                }
-                                seen[key] = true;
-                                const QString safe =
-                                        "a" + QString::number(m_seq++);
-                                {
-                                        QMutexLocker lock(&g_appicon_mutex);
-                                        g_appicon_paths[safe] = path;
-                                }
-                                QVariantMap app;
-                                app.insert("name", name);
-                                app.insert("path", path);
-                                app.insert("icon", safe);
-                                list.append(app);
-                        }
-                }
-                std::sort(list.begin(), list.end(),
-                        [](const QVariant &a, const QVariant &b) {
-                                return a.toMap().value("name").toString()
-                                        .compare(b.toMap().value("name")
-                                                .toString(),
-                                                Qt::CaseInsensitive) < 0;
-                        });
-                return list;
+                return meraki_scan_apps(m_seq);
         }
 
         void applyFilter() {
@@ -2111,9 +2286,243 @@ static void meraki_toggle_apps_impl() {
         }
 }
 
+// Spotlight: пилюля поиска по центру экрана (Super+Space). Приложения —
+// тот же скан «Пуска», что у Launchpad; числовое выражение считается как
+// калькулятор (Enter копирует ответ в буфер).
+class MerakiSpotlight : public QObject {
+        Q_OBJECT
+        Q_PROPERTY(bool open READ isOpen NOTIFY openChanged)
+        Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY filteredChanged)
+        Q_PROPERTY(QVariantList filtered READ filtered NOTIFY filteredChanged)
+        Q_PROPERTY(QString answer READ answer NOTIFY filteredChanged)
+        Q_PROPERTY(int screenWidth READ screenWidth CONSTANT)
+        Q_PROPERTY(int screenHeight READ screenHeight CONSTANT)
+        Q_PROPERTY(QUrl wallpaper READ wallpaper CONSTANT)
+
+public:
+        explicit MerakiSpotlight(QObject *parent = nullptr) : QObject(parent) {}
+
+        bool isOpen() const {
+                return m_open;
+        }
+
+        QString query() const {
+                return m_query;
+        }
+
+        QVariantList filtered() const {
+                return m_filtered;
+        }
+
+        QString answer() const {
+                return m_answer;
+        }
+
+        int screenWidth() const {
+                return m_screenWidth;
+        }
+
+        int screenHeight() const {
+                return m_screenHeight;
+        }
+
+        QUrl wallpaper() const {
+                return m_wallpaper;
+        }
+
+        void setQuery(const QString &q) {
+                if (m_query == q) {
+                        return;
+                }
+                m_query = q;
+                applyFilter();
+        }
+
+        Q_INVOKABLE void toggle() {
+                if (m_open) {
+                        setOpen(false);
+                        return;
+                }
+                ensureView();
+                m_view->show();
+                m_view->raise();
+                m_view->requestActivate();
+                setOpen(true);
+                scanAsync();
+        }
+
+        Q_INVOKABLE void close() {
+                setOpen(false);
+        }
+
+        // Enter: калькулятор копирует ответ, иначе запускаем первое приложение.
+        Q_INVOKABLE void runResult() {
+                if (!m_answer.isEmpty()) {
+                        QGuiApplication::clipboard()->setText(m_answer);
+                        setOpen(false);
+                        return;
+                }
+                if (!m_filtered.isEmpty()) {
+                        openApp(m_filtered.first().toMap()
+                                .value("path").toString());
+                }
+        }
+
+        Q_INVOKABLE void openApp(const QString &path) {
+                setOpen(false);
+                if (path.isEmpty()) {
+                        return;
+                }
+                const std::wstring p = path.toStdWString();
+                SHELLEXECUTEINFOW info = {};
+                info.cbSize = sizeof(info);
+                info.lpFile = p.c_str();
+                info.nShow = SW_SHOWNORMAL;
+                ShellExecuteExW(&info);
+        }
+
+signals:
+        void openChanged();
+        void filteredChanged();
+
+private:
+        void ensureView() {
+                if (m_view) {
+                        return;
+                }
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        const QRect g = screen->geometry();
+                        m_screenWidth = g.width();
+                        m_screenHeight = g.height();
+                }
+                m_wallpaper = meraki_wallpaper_url();
+                m_view = new QQuickView();
+                m_view->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
+                        Qt::Tool | Qt::NoDropShadowWindowHint);
+                m_view->setColor(Qt::transparent);
+                m_view->setResizeMode(QQuickView::SizeRootObjectToView);
+                m_view->rootContext()->setContextProperty("bridge", this);
+                m_view->engine()->addImageProvider("appicon",
+                        new AppIconProvider());
+                m_view->setSource(QUrl(QStringLiteral(
+                        "qrc:/qml/Meraki/apps/Spotlight.qml")));
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        const QRect g = screen->geometry();
+                        const int w = 680;
+                        const int h = 460;
+                        m_view->setGeometry(
+                                g.x() + (g.width() - w) / 2,
+                                g.y() + g.height() / 5, w, h);
+                }
+                QObject::connect(m_view, &QQuickWindow::activeChanged, this, [this]() {
+                        if (m_view && m_open && !m_view->isActive()) {
+                                setOpen(false);
+                        }
+                });
+        }
+
+        void scanAsync() {
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                if (m_scanBusy || (!m_apps.isEmpty() && now - m_scanStamp < 5000)) {
+                        return;
+                }
+                m_scanBusy = true;
+                m_scanStamp = now;
+                QThreadPool::globalInstance()->start([this]() {
+                        const QVariantList list = meraki_scan_apps(m_seq);
+                        QMetaObject::invokeMethod(this, [this, list]() {
+                                m_scanBusy = false;
+                                if (list != m_apps) {
+                                        m_apps = list;
+                                }
+                                applyFilter();
+                        }, Qt::QueuedConnection);
+                });
+        }
+
+        void applyFilter() {
+                QVariantList list;
+                const QString needle = m_query.trimmed();
+                for (const QVariant &v : m_apps) {
+                        const QVariantMap a = v.toMap();
+                        if (needle.isEmpty() || a.value("name").toString()
+                                .contains(needle, Qt::CaseInsensitive)) {
+                                list.append(a);
+                        }
+                }
+                if (list != m_filtered) {
+                        m_filtered = list;
+                }
+                // Калькулятор: только цифры, скобки и операторы. Считаем
+                // движком JS (2^10 → 2**10, запятая — точка).
+                QString ans;
+                static const QRegularExpression chars(
+                        QStringLiteral("^[-+*/().,%^\\d\\s]+$"));
+                static const QRegularExpression op(
+                        QStringLiteral("[-+*/^%]"));
+                if (needle.size() >= 3 && op.match(needle).hasMatch()
+                        && chars.match(needle).hasMatch()) {
+                        QJSEngine engine;
+                        QString js = needle;
+                        js.replace(',', '.');
+                        js.replace('^', "**");
+                        QJSValue r = engine.evaluate(js);
+                        if (r.isNumber() && std::isfinite(r.toNumber())) {
+                                const double d = r.toNumber();
+                                if (std::fabs(d - std::round(d)) < 1e-9
+                                        && std::fabs(d) < 9e15) {
+                                        ans = QString::number(
+                                                (qlonglong)std::llround(d));
+                                } else {
+                                        ans = QString::number(d, 'g', 12);
+                                }
+                        }
+                }
+                if (ans != m_answer) {
+                        m_answer = ans;
+                }
+                emit filteredChanged();
+        }
+
+        void setOpen(bool open) {
+                if (m_open == open) {
+                        return;
+                }
+                m_open = open;
+                emit openChanged();
+                if (!open) {
+                        QTimer::singleShot(200, this, [this]() {
+                                if (!m_open && m_view) {
+                                        m_view->hide();
+                                }
+                        });
+                }
+        }
+
+        QQuickView *m_view = nullptr;
+        QVariantList m_apps;
+        QVariantList m_filtered;
+        QString m_query;
+        QString m_answer;
+        QUrl m_wallpaper;
+        int m_screenWidth = 0;
+        int m_screenHeight = 0;
+        int m_seq = 1;
+        qint64 m_scanStamp = 0;
+        bool m_scanBusy = false;
+        bool m_open = false;
+};
+
+static MerakiSpotlight *g_spot = nullptr;
+
+// Единственная сессия SMTC: тосты/центр/Control Center и виджет медиа
+// смотрят на один и тот же объект (создаёт MerakiWidgets).
+static MerakiMedia *g_media = nullptr;
+
 class MerakiWidgets : public QObject {
         Q_OBJECT
         Q_PROPERTY(QVariantMap config READ config NOTIFY configChanged)
+        Q_PROPERTY(QVariantMap sys READ sys NOTIFY sysChanged)
         Q_PROPERTY(int screenWidth READ screenWidth CONSTANT)
         Q_PROPERTY(int screenHeight READ screenHeight CONSTANT)
         Q_PROPERTY(QUrl wallpaper READ wallpaper CONSTANT)
@@ -2131,6 +2540,13 @@ public:
                 connect(m_placeTimer, &QTimer::timeout, this,
                         &MerakiWidgets::reposition);
                 m_placeTimer->start();
+                // ЦП/ОЗУ для виджета «Система» — те же хелперы, что у бара.
+                m_sysTimer = new QTimer(this);
+                m_sysTimer->setInterval(2000);
+                connect(m_sysTimer, &QTimer::timeout, this,
+                        &MerakiWidgets::updateSys);
+                m_sysTimer->start();
+                updateSys();
         }
 
         void show() {
@@ -2143,6 +2559,7 @@ public:
                 }
                 m_media = new MerakiMedia(this);
                 m_media->start();
+                g_media = m_media;
                 const QList<QScreen *> screens = QGuiApplication::screens();
                 for (QScreen *screen : screens) {
                         addScreen(screen);
@@ -2172,6 +2589,33 @@ public:
                 return m_config;
         }
 
+        QVariantMap sys() const {
+                return m_sys;
+        }
+
+        // ЦП/ОЗУ/диск/температура — снимок раз в 2 с (виджет «Система»).
+        void updateSys() {
+                QVariantMap s;
+                int cpu = 0;
+                if (sysinfo_cpu(&cpu)) {
+                        s.insert("cpu", cpu);
+                }
+                struct sysinfo_memory mem = {};
+                if (sysinfo_memory(&mem)) {
+                        s.insert("mem", mem.percentage);
+                        s.insert("memUsed", QString::number(mem.used_gib, 'f', 1));
+                        s.insert("memTotal", QString::number(mem.total_gib, 'f', 1));
+                }
+                double t = 0;
+                if (sysinfo_temperature(0, &t)) {
+                        s.insert("temp", int(t));
+                }
+                if (s != m_sys) {
+                        m_sys = s;
+                        emit sysChanged();
+                }
+        }
+
         Q_INVOKABLE void setWidgetPos(const QString &key, qreal x, qreal y) {
                 QVariantMap positions = m_config.value("positions").toMap();
                 QVariantMap p;
@@ -2181,6 +2625,17 @@ public:
                 m_config.insert("positions", positions);
                 savePositions(positions);
                 emit configChanged();
+        }
+
+        // Текст заметки: карточка сохраняет по окончании редактирования.
+        Q_INVOKABLE void saveNote(const QString &text) {
+                const QString path = meraki_home_dir()
+                        + "/.swinewm/notes.txt";
+                QDir().mkpath(QFileInfo(path).absolutePath());
+                QFile f(path);
+                if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                        f.write(text.toUtf8());
+                }
         }
 
         int screenWidth() const {
@@ -2277,6 +2732,7 @@ public slots:
 signals:
         void windowsChanged();
         void configChanged();
+        void sysChanged();
 
 public slots:
         void updateRegion() {
@@ -2380,6 +2836,11 @@ private:
                 c.insert("mediaEnabled", true);
                 c.insert("mediaWidth", 320);
                 c.insert("mediaHeight", 104);
+                c.insert("sysEnabled", true);
+                c.insert("sysSize", 168);
+                c.insert("notesEnabled", true);
+                c.insert("notesWidth", 224);
+                c.insert("notesHeight", 168);
                 QFile f(widgets_path());
                 if (f.open(QIODevice::ReadOnly)) {
                         const QJsonObject o = QJsonDocument::fromJson(
@@ -2393,6 +2854,10 @@ private:
                                 o.value("weather").toObject().toVariantMap();
                         const QVariantMap media =
                                 o.value("media").toObject().toVariantMap();
+                        const QVariantMap sys =
+                                o.value("sys").toObject().toVariantMap();
+                        const QVariantMap notes =
+                                o.value("notes").toObject().toVariantMap();
                         for (const char *k : {"screens", "side", "margin",
                                 "top", "spacing", "latitude", "longitude",
                                 "city", "positions"}) {
@@ -2415,6 +2880,17 @@ private:
                         pick(c, media, "enabled", "mediaEnabled");
                         pick(c, media, "width", "mediaWidth");
                         pick(c, media, "height", "mediaHeight");
+                        pick(c, sys, "enabled", "sysEnabled");
+                        pick(c, sys, "size", "sysSize");
+                        pick(c, notes, "enabled", "notesEnabled");
+                        pick(c, notes, "width", "notesWidth");
+                        pick(c, notes, "height", "notesHeight");
+                }
+                // Текст заметки живёт рядом (notes.txt), не в widgets.json.
+                QFile nf(meraki_home_dir() + "/.swinewm/notes.txt");
+                if (nf.open(QIODevice::ReadOnly)) {
+                        c.insert("notesText",
+                                QString::fromUtf8(nf.readAll()));
                 }
                 m_config = c;
         }
@@ -2422,15 +2898,232 @@ private:
         QList<Screen> m_screens;
         QTimer *m_regionTimer = nullptr;
         QTimer *m_placeTimer = nullptr;
+        QTimer *m_sysTimer = nullptr;
         QFileSystemWatcher *m_watcher = nullptr;
         MerakiMedia *m_media = nullptr;
         QVariantMap m_config;
+        QVariantMap m_sys;
         QUrl m_wallpaper;
         int m_screenWidth = 0;
         int m_screenHeight = 0;
 };
 
 static MerakiWidgets *g_widgets = nullptr;
+
+// Control Center: стеклянная панель с тайлами справа под лентой (порт
+// ccStyle "tiles" из MacBar). Тайлы: Wi-Fi/Bluetooth/ночной свет открывают
+// страницы Параметров, «Не беспокоить» — настоящий тумблер (центр),
+// ползунок громкости и медиа работают с sysinfo/SMTC.
+class MerakiCC : public QObject {
+        Q_OBJECT
+        Q_PROPERTY(bool open READ isOpen NOTIFY openChanged)
+        Q_PROPERTY(QVariantMap status READ status NOTIFY statusChanged)
+        Q_PROPERTY(bool dnd READ dnd NOTIFY dndChanged)
+        Q_PROPERTY(QUrl wallpaper READ wallpaper CONSTANT)
+        Q_PROPERTY(int screenWidth READ screenWidth CONSTANT)
+        Q_PROPERTY(int screenHeight READ screenHeight CONSTANT)
+        Q_PROPERTY(qreal panelX MEMBER m_panelX)
+        Q_PROPERTY(qreal panelY MEMBER m_panelY)
+        Q_PROPERTY(qreal panelW MEMBER m_panelW)
+        Q_PROPERTY(qreal panelH MEMBER m_panelH)
+
+public:
+        explicit MerakiCC(QObject *parent = nullptr) : QObject(parent) {
+                m_regionTimer = new QTimer(this);
+                m_regionTimer->setInterval(90);
+                connect(m_regionTimer, &QTimer::timeout, this,
+                        &MerakiCC::applyRegion);
+                m_regionTimer->start();
+                m_poll = new QTimer(this);
+                m_poll->setInterval(2000);
+                connect(m_poll, &QTimer::timeout, this, &MerakiCC::updateStatus);
+                m_poll->start();
+        }
+
+        bool isOpen() const {
+                return m_open;
+        }
+
+        QVariantMap status() const {
+                return m_status;
+        }
+
+        bool dnd() const {
+                return g_center ? g_center->dnd() : false;
+        }
+
+        QUrl wallpaper() const {
+                return m_wallpaper;
+        }
+
+        int screenWidth() const {
+                return m_screenWidth;
+        }
+
+        int screenHeight() const {
+                return m_screenHeight;
+        }
+
+        Q_INVOKABLE void toggle() {
+                if (m_open) {
+                        setOpen(false);
+                        return;
+                }
+                ensureView();
+                updateStatus();
+                m_view->show();
+                m_view->raise();
+                m_view->requestActivate();
+                setOpen(true);
+        }
+
+        Q_INVOKABLE void close() {
+                setOpen(false);
+        }
+
+        Q_INVOKABLE void toggleDnd() {
+                if (g_center) {
+                        g_center->toggleDnd();
+                }
+                emit dndChanged();
+        }
+
+        Q_INVOKABLE void setVolume(int pct) {
+                sysinfo_audio_set_volume(false,
+                        std::max(0, std::min(100, pct)));
+                updateStatus();
+        }
+
+        Q_INVOKABLE void volumeMute() {
+                sysinfo_audio_set_mute(false, -1);
+                updateStatus();
+        }
+
+        // Тайл открывает свою страницу Параметров Windows.
+        Q_INVOKABLE void openSettings(const QString &page) {
+                setOpen(false);
+                const std::wstring uri =
+                        (L"ms-settings:" + page).toStdWString();
+                SHELLEXECUTEINFOW info = {};
+                info.cbSize = sizeof(info);
+                info.lpFile = uri.c_str();
+                info.nShow = SW_SHOWNORMAL;
+                ShellExecuteExW(&info);
+        }
+
+signals:
+        void openChanged();
+        void statusChanged();
+        void dndChanged();
+
+private:
+        void ensureView() {
+                if (m_view) {
+                        return;
+                }
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        const QRect g = screen->geometry();
+                        m_screenWidth = g.width();
+                        m_screenHeight = g.height();
+                }
+                m_wallpaper = meraki_wallpaper_url();
+                m_view = new QQuickView();
+                m_view->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
+                        Qt::Tool | Qt::NoDropShadowWindowHint);
+                m_view->setColor(Qt::transparent);
+                m_view->setResizeMode(QQuickView::SizeRootObjectToView);
+                m_view->rootContext()->setContextProperty("bridge", this);
+                if (g_media) {
+                        m_view->rootContext()->setContextProperty("media",
+                                g_media);
+                }
+                m_view->setSource(QUrl(QStringLiteral(
+                        "qrc:/qml/Meraki/center/CC.qml")));
+                // Панель справа под лентой; стекло меряет обои в координатах
+                // окна, поэтому окно на весь экран, регион — по панели.
+                if (QScreen *screen = QGuiApplication::primaryScreen()) {
+                        m_view->setGeometry(screen->geometry());
+                }
+                QObject::connect(m_view, &QQuickWindow::activeChanged, this, [this]() {
+                        if (m_view && m_open && !m_view->isActive()) {
+                                setOpen(false);
+                        }
+                });
+        }
+
+        // Тот же набор sysinfo, что у индикаторов ленты.
+        void updateStatus() {
+                QVariantMap st;
+                struct sysinfo_audio a = {};
+                if (sysinfo_audio(&a) && a.present) {
+                        st.insert("volume", a.volume);
+                        st.insert("muted", a.muted);
+                }
+                struct sysinfo_battery b = {};
+                if (sysinfo_battery(&b)) {
+                        QVariantMap bat;
+                        bat.insert("capacity", b.capacity);
+                        bat.insert("charging", b.charging);
+                        st.insert("battery", bat);
+                }
+                struct sysinfo_network n = {};
+                if (sysinfo_network(nullptr, &n) && n.found) {
+                        QVariantMap net;
+                        net.insert("up", n.connected);
+                        net.insert("wireless", n.wireless);
+                        net.insert("essid",
+                                QString::fromLatin1(n.essid).trimmed());
+                        st.insert("net", net);
+                }
+                if (st != m_status) {
+                        m_status = st;
+                        emit statusChanged();
+                }
+                emit dndChanged();
+        }
+
+        void setOpen(bool open) {
+                if (m_open == open) {
+                        return;
+                }
+                m_open = open;
+                emit openChanged();
+                if (!open) {
+                        QTimer::singleShot(200, this, [this]() {
+                                if (!m_open && m_view) {
+                                        m_view->hide();
+                                }
+                        });
+                }
+        }
+
+        void applyRegion() {
+                if (!m_view || !m_view->isVisible()) {
+                        return;
+                }
+                const qreal dpr = m_view->devicePixelRatio();
+                SetWindowRgn((HWND)m_view->winId(), CreateRoundRectRgn(
+                        int(m_panelX * dpr), int(m_panelY * dpr),
+                        int((m_panelX + m_panelW) * dpr),
+                        int((m_panelY + m_panelH) * dpr),
+                        int(22 * dpr), int(22 * dpr)), FALSE);
+        }
+
+        QQuickView *m_view = nullptr;
+        QTimer *m_regionTimer = nullptr;
+        QTimer *m_poll = nullptr;
+        QVariantMap m_status;
+        QUrl m_wallpaper;
+        int m_screenWidth = 0;
+        int m_screenHeight = 0;
+        qreal m_panelX = 0;
+        qreal m_panelY = 0;
+        qreal m_panelW = 0;
+        qreal m_panelH = 0;
+        bool m_open = false;
+};
+
+static MerakiCC *g_cc = nullptr;
 
 // Состояние всплывающего меню верхней ленты: id меню + список пунктов
 // (label/act или {sep:true}); действия исполняет bridge.barAction().
@@ -2568,6 +3261,18 @@ public slots:
         Q_INVOKABLE void toggleApps() {
                 if (g_apps) {
                         g_apps->toggle();
+                }
+        }
+
+        Q_INVOKABLE void toggleSpotlight() {
+                if (g_spot) {
+                        g_spot->toggle();
+                }
+        }
+
+        Q_INVOKABLE void toggleCC() {
+                if (g_cc) {
+                        g_cc->toggle();
                 }
         }
 
@@ -2842,6 +3547,14 @@ public slots:
                                         } else if (what == "center"
                                                 && g_center) {
                                                 g_center->toggle();
+                                        } else if (what == "spotlight"
+                                                && g_spot) {
+                                                g_spot->toggle();
+                                        } else if (what == "cc" && g_cc) {
+                                                g_cc->toggle();
+                                        } else if (what == "dnd"
+                                                && g_center) {
+                                                g_center->toggleDnd();
                                         }
                                 }
                         }
@@ -3105,12 +3818,18 @@ static DWORD WINAPI meraki_qml_main(LPVOID arg) {
                 &center, &MerakiCenter::reposition);
         MerakiApps apps;
         g_apps = &apps;
+        MerakiSpotlight spot;
+        g_spot = &spot;
+        MerakiCC cc;
+        g_cc = &cc;
         MerakiWidgets widgets;
         g_widgets = &widgets;
         widgets.show();
         app.exec();
         g_widgets = nullptr;
         g_apps = nullptr;
+        g_spot = nullptr;
+        g_cc = nullptr;
         g_bar = nullptr;
         g_center = nullptr;
         g_dock = nullptr;

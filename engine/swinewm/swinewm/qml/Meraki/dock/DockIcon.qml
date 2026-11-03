@@ -7,6 +7,21 @@ Item {
     required property var modelData
     required property int index
 
+    // Сдвиг при drag-реордере пинов (задаёт Dock.qml); у тянущейся иконки
+    // сдвиг следует за курсором без анимации, у остальных — с пружиной.
+    property real shiftX: 0
+    readonly property bool isDragging: !isService && modelData.pinned
+        && root.dragKey === modelData.key
+
+    transform: Translate {
+        x: cell.shiftX
+
+        Behavior on x {
+            enabled: !cell.isDragging
+            NumberAnimation { duration: 130; easing.type: Easing.OutCubic }
+        }
+    }
+
     readonly property bool isSep: modelData.kind === "sep"
     readonly property bool isApps: modelData.kind === "apps"
     readonly property bool isTrash: modelData.kind === "trash"
@@ -132,7 +147,42 @@ Item {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
         acceptedButtons: Qt.LeftButton | Qt.RightButton
+
+        // Drag-реордер: только закреплённые приложения, порог 6px.
+        property bool armed: false
+        property bool moved: false
+        property real pressX: 0
+
+        onPressed: function(mouse) {
+            armed = mouse.button === Qt.LeftButton && !cell.isService
+                && cell.modelData.pinned
+            moved = false
+            pressX = mouse.x
+        }
+        onPositionChanged: function(mouse) {
+            if (!armed || !pressed) {
+                return
+            }
+            if (!moved && Math.abs(mouse.x - pressX) < 6) {
+                return
+            }
+            moved = true
+            root.dragActive = true
+            root.dragKey = cell.modelData.key
+            root.dragMx = cell.mapToItem(root, mouse.x, 0).x
+        }
+        onReleased: {
+            if (moved) {
+                root.finishDrag()
+            }
+        }
         onClicked: function(mouse) {
+            if (moved) {
+                moved = false
+                armed = false
+                return
+            }
+            armed = false
             if (cell.isApps) {
                 bridge.openApps()
                 return

@@ -10,13 +10,17 @@ Item {
         cfg.clockEnabled ? cfg.clockSize : 0,
         cfg.calendarEnabled ? cfg.calendarSize : 0,
         cfg.weatherEnabled ? cfg.weatherWidth : 0,
-        cfg.mediaEnabled ? cfg.mediaWidth : 0)
+        cfg.mediaEnabled ? cfg.mediaWidth : 0,
+        cfg.sysEnabled ? cfg.sysSize : 0,
+        cfg.notesEnabled ? cfg.notesWidth : 0)
 
     // Тянут ли карточку сейчас (для расширенной зоны ввода под курсором)
     property bool clockDrag: false
     property bool calendarDrag: false
     property bool weatherDrag: false
     property bool mediaDrag: false
+    property bool sysDrag: false
+    property bool notesDrag: false
 
     width: viewW
     height: viewH
@@ -49,7 +53,7 @@ Item {
 
     function reportCards() {
         var list = []
-        var cards = [clockC, calendarC, weatherC, mediaC]
+        var cards = [clockC, calendarC, weatherC, mediaC, sysC, notesC]
         for (var i = 0; i < cards.length; i++) {
             var c = cards[i]
             if (!c.visible || c.width <= 0 || c.height <= 0) {
@@ -60,7 +64,9 @@ Item {
             var pad = (c === clockC && root.clockDrag)
                 || (c === calendarC && root.calendarDrag)
                 || (c === weatherC && root.weatherDrag)
-                || (c === mediaC && root.mediaDrag) ? 90 : 0
+                || (c === mediaC && root.mediaDrag)
+                || (c === sysC && root.sysDrag)
+                || (c === notesC && root.notesDrag) ? 90 : 0
             list.push({
                 x: Math.floor(c.x - pad),
                 y: Math.floor(c.y - pad),
@@ -109,6 +115,16 @@ Item {
         if (root.cfg.mediaEnabled && media.hasSession) {
             mediaC.x = root.px("media", root.defX(root.cfg.mediaWidth))
             mediaC.y = root.py("media", y)
+            y += root.cfg.mediaHeight + root.cfg.spacing
+        }
+        if (root.cfg.sysEnabled) {
+            sysC.x = root.px("sys", root.defX(root.cfg.sysSize))
+            sysC.y = root.py("sys", y)
+            y += root.cfg.sysSize + root.cfg.spacing
+        }
+        if (root.cfg.notesEnabled) {
+            notesC.x = root.px("notes", root.defX(root.cfg.notesWidth))
+            notesC.y = root.py("notes", y)
         }
     }
 
@@ -236,6 +252,56 @@ Item {
             onReleased: {
                 root.mediaDrag = false
                 root.clampDrop("media", mediaC)
+            }
+        }
+    }
+
+    SystemCard {
+        id: sysC
+        visible: root.cfg.sysEnabled
+        width: root.cfg.sysSize
+        height: root.cfg.sysSize
+        backdrop: backdrop
+
+        onXChanged: root.reportCards()
+        onYChanged: root.reportCards()
+
+        MouseArea {
+            z: -1
+            anchors.fill: parent
+            cursorShape: Qt.SizeAllCursor
+            drag.target: sysC
+            drag.axis: Drag.XAndYAxis
+            onPressed: root.sysDrag = true
+            onCanceled: root.sysDrag = false
+            onReleased: {
+                root.sysDrag = false
+                root.clampDrop("sys", sysC)
+            }
+        }
+    }
+
+    NotesCard {
+        id: notesC
+        visible: root.cfg.notesEnabled
+        width: root.cfg.notesWidth
+        height: root.cfg.notesHeight
+        backdrop: backdrop
+
+        onXChanged: root.reportCards()
+        onYChanged: root.reportCards()
+
+        MouseArea {
+            z: -1
+            anchors.fill: parent
+            cursorShape: Qt.SizeAllCursor
+            drag.target: notesC
+            drag.axis: Drag.XAndYAxis
+            onPressed: root.notesDrag = true
+            onCanceled: root.notesDrag = false
+            onReleased: {
+                root.notesDrag = false
+                root.clampDrop("notes", notesC)
             }
         }
     }

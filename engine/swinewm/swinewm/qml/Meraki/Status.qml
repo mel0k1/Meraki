@@ -2,7 +2,8 @@ import QtQuick
 
 // Правый блок статуса ленты (порт MacBar): сеть, громкость, батарея,
 // поиск и колокольчик. Пилюли при наведении — как у остальных элементов;
-// громкость меняется колесом, клик — mute; поиск открывает Launchpad.
+// громкость меняется колесом, клик — mute; поиск открывает Spotlight
+// (пилюля поиска, тот же хоткей Super+Space).
 Row {
     id: status
 
@@ -252,7 +253,7 @@ Row {
         }
     }
 
-    // --- поиск (Launchpad) ---
+    // --- поиск (Spotlight) ---
     Item {
         width: 26
         height: 22
@@ -294,7 +295,7 @@ Row {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: bridge.toggleApps()
+            onClicked: bridge.toggleSpotlight()
         }
     }
 

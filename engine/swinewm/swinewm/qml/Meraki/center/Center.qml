@@ -94,6 +94,70 @@ Item {
                 font.weight: Font.DemiBold
             }
 
+            // «Не беспокоить»: месяц-тумблер в шапке центра (MacShell).
+            Item {
+                id: dndPill
+
+                anchors.right: parent.right
+                anchors.rightMargin: 70
+                anchors.verticalCenter: parent.verticalCenter
+                width: 26
+                height: 26
+
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 24
+                    height: 22
+                    radius: 7
+                    color: bridge.dnd ? "#5E5CE6"
+                        : (dndMa.containsMouse
+                            ? Qt.rgba(1, 1, 1, 0.14) : "transparent")
+                    Behavior on color { ColorAnimation { duration: 140 } }
+                }
+
+                Canvas {
+                    anchors.centerIn: parent
+                    width: 14
+                    height: 14
+                    antialiasing: true
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.reset()
+                        ctx.clearRect(0, 0, width, height)
+                        ctx.fillStyle = "rgba(255,255,255,0.92)"
+                        ctx.beginPath()
+                        ctx.arc(7, 7, 5.4, 0, 2 * Math.PI)
+                        ctx.fill()
+                        ctx.fillStyle = bridge.dnd ? "#5E5CE6"
+                            : "rgba(24,24,26,0.90)"
+                        ctx.beginPath()
+                        ctx.arc(10.2, 4.9, 4.4, 0, 2 * Math.PI)
+                        ctx.fill()
+                    }
+                }
+
+                MouseArea {
+                    id: dndMa
+
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: bridge.toggleDnd()
+                }
+
+                Connections {
+                    target: bridge
+                    function onDndChanged() {
+                        for (var i = 0; i < dndPill.children.length; i++) {
+                            var c = dndPill.children[i]
+                            if (c.requestPaint) {
+                                c.requestPaint()
+                            }
+                        }
+                    }
+                }
+            }
+
             Text {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter

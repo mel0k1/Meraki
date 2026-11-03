@@ -27,8 +27,19 @@
         "width": 320,
         "height": 104
     },
+    "sys": {
+        "enabled": true,
+        "size": 168
+    },
+    "notes": {
+        "enabled": true,
+        "width": 224,
+        "height": 168
+    },
     "positions": {
         "clock": {"x": 1500, "y": 76},
-        "calendar": {"x": 1444, "y": 260}
+        "calendar": {"x": 1444, "y": 260},
+        "sys": {"x": 1470, "y": 520},
+        "notes": {"x": 1444, "y": 704}
     }
 }

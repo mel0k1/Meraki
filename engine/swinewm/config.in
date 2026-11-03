@@ -78,6 +78,16 @@ default_floating_border none
     # sway-style swinemenu instead.
     bindsym $mod+d nop meraki:launchpad
 
+    # Spotlight: the search pill in the middle of the screen (apps plus a
+    # calculator; Enter copies the answer). The same shell as the magnifier
+    # icon in the bar.
+    bindsym $mod+space nop meraki:spotlight
+
+    # Control Center (the toggles panel under the bar) and "Do not disturb"
+    # (the same switch as in the notification center).
+    bindsym $mod+Shift+s nop meraki:cc
+    bindsym $mod+Shift+d nop meraki:dnd
+
     # Drag floating windows by holding down $mod and left mouse button.
     # Resize them with right mouse button + $mod.
     # Despite the name, also works for non-floating windows.
@@ -160,9 +170,6 @@ default_floating_border none
 
     # Toggle the current focus between tiling and floating mode
     bindsym $mod+Shift+space floating toggle
-
-    # Swap focus between the tiling area and the floating area
-    bindsym $mod+space focus mode_toggle
 
     # Move focus to the parent container
     bindsym $mod+a focus parent

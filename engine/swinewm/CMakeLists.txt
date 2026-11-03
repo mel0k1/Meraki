@@ -185,9 +185,11 @@ if(WIN32)
         Meraki/glass/DockGlassPanel.qml Meraki/dock/Dock.qml
         Meraki/dock/DockIcon.qml Meraki/dock/DockTip.qml Meraki/dock/Preview.qml
         Meraki/dock/DockMenu.qml Meraki/center/Center.qml Meraki/center/Toast.qml
-        Meraki/apps/Launchpad.qml Meraki/widgets/Widgets.qml
+        Meraki/apps/Launchpad.qml Meraki/apps/Spotlight.qml
+        Meraki/center/CC.qml Meraki/widgets/Widgets.qml
         Meraki/widgets/ClockCard.qml Meraki/widgets/CalendarCard.qml
         Meraki/widgets/WeatherCard.qml Meraki/widgets/MediaCard.qml
+        Meraki/widgets/SystemCard.qml Meraki/widgets/NotesCard.qml
         Meraki/widgets/WeatherGlyph.qml)
       set_source_files_properties(${MERAKI_QML_ROOT}/${f} PROPERTIES QT_RESOURCE_ALIAS ${f})
     endforeach()
@@ -212,11 +214,15 @@ if(WIN32)
       ${MERAKI_QML_ROOT}/Meraki/center/Center.qml
       ${MERAKI_QML_ROOT}/Meraki/center/Toast.qml
       ${MERAKI_QML_ROOT}/Meraki/apps/Launchpad.qml
+      ${MERAKI_QML_ROOT}/Meraki/apps/Spotlight.qml
+      ${MERAKI_QML_ROOT}/Meraki/center/CC.qml
       ${MERAKI_QML_ROOT}/Meraki/widgets/Widgets.qml
       ${MERAKI_QML_ROOT}/Meraki/widgets/ClockCard.qml
       ${MERAKI_QML_ROOT}/Meraki/widgets/CalendarCard.qml
       ${MERAKI_QML_ROOT}/Meraki/widgets/WeatherCard.qml
       ${MERAKI_QML_ROOT}/Meraki/widgets/MediaCard.qml
+      ${MERAKI_QML_ROOT}/Meraki/widgets/SystemCard.qml
+      ${MERAKI_QML_ROOT}/Meraki/widgets/NotesCard.qml
       ${MERAKI_QML_ROOT}/Meraki/widgets/WeatherGlyph.qml)
     qt_add_shaders(swinewm "meraki_shaders" PREFIX "/shaders" FILES
       swinewm/qml/Meraki/shaders/liquidglass.frag

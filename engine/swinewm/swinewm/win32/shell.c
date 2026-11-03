@@ -328,20 +328,23 @@ void win32_shell_start(void) {
 // them the same way it does for the built-in bar, and the Windows work area
 // (maximized and unmanaged windows) is derived from the same box.
 #define MERAKI_BAR_RESERVE 28
-#define MERAKI_DOCK_RESERVE 76
 
 // Added on top of the built-in bar's reservation: the strips the QML shell
 // draws itself. Qt's logical pixels follow the monitor DPI exactly like
 // output->scale does, so scaling by it lands on the same physical height.
+// The dock's reserve is dynamic: with smart-hide on (settings.json ->
+// dock.smartHide) the hidden dock collapses to a thin edge strip; the
+// value is published by qmlbar.cpp.
 void win32_shell_reserve(const struct swine_output *output,
 		struct side_gaps *gaps) {
 	if (!win32_shell_mode) {
 		return;
 	}
 #ifdef MERAKI_QML
+	extern int meraki_dock_reserve_px(void);
 	const double scale = output->scale > 0 ? output->scale : 1.0;
 	gaps->top += (int)(MERAKI_BAR_RESERVE * scale + 0.5);
-	gaps->bottom += (int)(MERAKI_DOCK_RESERVE * scale + 0.5);
+	gaps->bottom += (int)(meraki_dock_reserve_px() * scale + 0.5);
 #else
 	(void)output;
 #endif

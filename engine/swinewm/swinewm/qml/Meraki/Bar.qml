@@ -191,6 +191,60 @@ Item {
         height: 28
         spacing: 2
 
+        // Control Center (порт MacBar): два тумблера-лепестка.
+        Item {
+            width: 26
+            height: 22
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: parent.width - 2
+                height: parent.height - 4
+                radius: 6
+                color: ccMa.containsMouse ? Qt.rgba(1, 1, 1, 0.14)
+                                          : "transparent"
+                Behavior on color { ColorAnimation { duration: 120 } }
+            }
+
+            Canvas {
+                anchors.centerIn: parent
+                width: 16
+                height: 14
+                antialiasing: true
+                onPaint: {
+                    var ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.clearRect(0, 0, width, height)
+                    ctx.strokeStyle = "rgba(255,255,255,0.88)"
+                    ctx.fillStyle = "rgba(255,255,255,0.88)"
+                    ctx.lineWidth = 1.3
+                    // Левый тумблер: пилюля с точкой справа (вкл).
+                    ctx.beginPath()
+                    ctx.roundedRect(1, 2.4, 6.2, 9.2, 3.1, 3.1)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.arc(4.9, 7, 1.7, 0, 2 * Math.PI)
+                    ctx.fill()
+                    // Правый тумблер: пилюля с точкой слева (выкл).
+                    ctx.beginPath()
+                    ctx.roundedRect(8.8, 2.4, 6.2, 9.2, 3.1, 3.1)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.arc(10.9, 7, 1.7, 0, 2 * Math.PI)
+                    ctx.fill()
+                }
+            }
+
+            MouseArea {
+                id: ccMa
+
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: bridge.toggleCC()
+            }
+        }
+
         Loader {
             anchors.verticalCenter: parent.verticalCenter
             active: viewPrimary === true

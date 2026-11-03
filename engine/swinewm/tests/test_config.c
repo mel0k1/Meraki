@@ -201,6 +201,10 @@ static void test_default_config(void) {
         struct swine_binding *menu = keyboard_find_binding(SWINE_MOD_LOGO, 'D', false);
         // The DE default: the Meraki shell opens its Launchpad for Win+D.
         CHECK(menu && strcmp(menu->command, "nop meraki:launchpad") == 0);
+        struct swine_binding *spot = keyboard_find_binding(SWINE_MOD_LOGO, 0x20, false);
+        // Win+Space opens the Spotlight pill (the old focus mode_toggle is
+        // meaningless in the DE, where everything floats).
+        CHECK(spot && strcmp(spot->command, "nop meraki:spotlight") == 0);
         CHECK(config->bar_enabled);
         fake_teardown();
 }

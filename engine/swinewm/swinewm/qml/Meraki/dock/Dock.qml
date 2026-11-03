@@ -22,10 +22,70 @@ Item {
     property bool hovered: false
     property string hoverKey: ""
 
+    // Drag-реордер пинов: тянем закреплённую иконку, остальные сдвигаются,
+    // отпускание — bridge.reorderPin(key, слот среди пинов).
+    property bool dragActive: false
+    property string dragKey: ""
+    property real dragMx: -10000
+
+    // Smart-hide (macOS): док уезжает за кромку, когда окно налегает на
+    // его полосу; выезд — по ховеру/кромке (см. MerakiDock::updateSmartHide).
+    readonly property bool hidden: bridge.dockHidden === true
+    readonly property real hideShift: hidden ? bgHeight + margin + 4 : 0
+
     readonly property int hoverIndex: {
         for (var i = 0; i < items.length; i++)
             if (items[i].key === hoverKey) return i
         return -1
+    }
+
+    // Слот dragged-иконки и целевой слот броска — в нумерации пинов.
+    readonly property int dragSlot: {
+        var n = 0
+        for (var i = 0; i < items.length; i++) {
+            var it = items[i]
+            if (it.kind === "app" && it.pinned) {
+                if (it.key === dragKey) return n
+                n++
+            }
+        }
+        return -1
+    }
+    readonly property int dropSlot: {
+        if (!dragActive || dragSlot < 0) return -1
+        var pins = 0
+        for (var i = 0; i < items.length; i++)
+            if (items[i].kind === "app" && items[i].pinned) pins++
+        var raw = Math.floor((dragMx - refLeft
+            + (iconSize + spacing) / 2) / (iconSize + spacing))
+        return Math.max(0, Math.min(pins - 1, raw))
+    }
+
+    function shiftFor(index, item) {
+        if (!dragActive || item.kind !== "app" || !item.pinned) return 0
+        var s = 0
+        for (var i = 0; i < index; i++) {
+            var it2 = items[i]
+            if (it2.kind === "app" && it2.pinned) s++
+        }
+        var step = iconSize + spacing
+        if (item.key === dragKey) {
+            return dragMx - (refLeft + index * step + iconSize / 2)
+        }
+        if (dragSlot < 0 || dropSlot < 0) return 0
+        if (dragSlot < dropSlot && s > dragSlot && s <= dropSlot) return -step
+        if (dragSlot > dropSlot && s < dragSlot && s >= dropSlot) return step
+        return 0
+    }
+
+    function finishDrag() {
+        if (!dragActive) return
+        var k = dragKey
+        var slot = dropSlot
+        dragActive = false
+        dragKey = ""
+        dragMx = -10000
+        if (slot >= 0) bridge.reorderPin(k, slot)
     }
 
     height: Math.ceil(margin + bgHeight + headroom)
@@ -166,7 +226,7 @@ Item {
         id: slab
         backdrop: backdrop
         x: (parent.width - width) / 2
-        y: parent.height - root.margin - height
+        y: parent.height - root.margin - height + root.hideShift
         width: row.width + 2 * root.hPad
         onWidthChanged: root.syncWidth()
         height: root.bgHeight
@@ -182,6 +242,10 @@ Item {
         dark: true
         glassBlur: 13
         captureWidth: root.totalW0 + 2 * root.hPad + root.iconSize * (root.effMag - 1) * 3.6
+
+        Behavior on y {
+            NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
+        }
     }
 
     // Кромка дока: тёмный контур снаружи + линия в цвете обоев (MacShell).
@@ -200,9 +264,18 @@ Item {
         spacing: root.spacing
         x: (parent.width - width) / 2
         y: parent.height - root.margin - root.bottomPad - root.iconSize
+           + root.hideShift
+
+        Behavior on y {
+            NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
+        }
+
         Repeater {
             model: root.items
-            DockIcon {}
+
+            DockIcon {
+                shiftX: root.shiftFor(index, modelData)
+            }
         }
     }
 
