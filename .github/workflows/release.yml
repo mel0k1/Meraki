@@ -100,7 +100,7 @@ jobs:
 
           Требования: Windows 10/11 x64. Исходники в engine/, детали порта —
           в docs/port.md.
-                    "@
+          "@
           $notes | Out-File notes.md -Encoding utf8
           gh release create "$env:GITHUB_REF_NAME" `
             "Meraki-$($env:GITHUB_REF_NAME)-x64.zip" `
